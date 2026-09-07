@@ -1,0 +1,4 @@
+# Raspberry Pi OS优先使用系统OpenCV/Picamera2，不要直接用此文件覆盖系统相机栈。
+# USB摄像头或非树莓派Linux虚拟环境可使用：
+numpy>=1.24
+opencv-contrib-python>=4.8,<5

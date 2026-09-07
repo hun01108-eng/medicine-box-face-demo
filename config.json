@@ -1,0 +1,24 @@
+{
+  "detector_model": "models/face_detection_yunet_2023mar.onnx",
+  "recognizer_model": "models/face_recognition_sface_2021dec.onnx",
+  "profile_path": "data/elder_001.json",
+  "camera_width": 640,
+  "camera_height": 480,
+  "detector_score_threshold": 0.85,
+  "detector_nms_threshold": 0.3,
+  "detector_top_k": 5000,
+  "use_clahe": true,
+  "decision": {
+    "similarity_threshold": 0.55,
+    "required_matches": 3,
+    "max_valid_frames": 5,
+    "timeout_seconds": 3.0,
+    "user_id": "elder_001"
+  },
+  "quality": {
+    "min_face_width": 100,
+    "min_brightness": 45.0,
+    "max_brightness": 220.0,
+    "min_sharpness": 60.0
+  }
+}
