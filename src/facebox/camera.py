@@ -29,7 +29,8 @@ class Picamera2Camera:
         from picamera2 import Picamera2
         self.camera = Picamera2()
         configuration = self.camera.create_preview_configuration(
-            main={"size": (width, height), "format": "BGR888"},
+            # libcamera RGB888 produces B,G,R bytes, as expected by OpenCV.
+            main={"size": (width, height), "format": "RGB888"},
             buffer_count=4,
         )
         self.camera.configure(configuration)

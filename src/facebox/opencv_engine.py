@@ -67,14 +67,17 @@ class OpenCVFaceEngine:
 
     def observe(self, frame, profile: FaceProfile, timestamp: float | None = None) -> FrameObservation:
         now = time.monotonic() if timestamp is None else timestamp
+        def observation(count, quality, score, reason=""):
+            finished = time.monotonic() if timestamp is None else timestamp
+            return FrameObservation(now, count, quality, score, reason, finished)
         faces = self.detect(frame)
         if len(faces) != 1:
-            return FrameObservation(now, len(faces), False, None, "no_face" if not faces else "multiple_faces")
+            return observation(len(faces), False, None, "no_face" if not faces else "multiple_faces")
         quality = evaluate_quality(self._metrics(frame, faces[0]), self.quality_config)
         if not quality.ok:
-            return FrameObservation(now, 1, False, None, quality.reason)
+            return observation(1, False, None, quality.reason)
         similarity = profile.best_cosine_similarity(self.feature(frame, faces[0]))
-        return FrameObservation(now, 1, True, similarity)
+        return observation(1, True, similarity)
 
     def enrollment_feature(self, frame) -> tuple[list[float] | None, str]:
         faces = self.detect(frame)
