@@ -197,6 +197,16 @@ PYTHONPATH=src python3 -m facebox.app self-check
 PYTHONPATH=src python3 -m facebox.app run --source picamera2 --display
 ```
 
+需要持续显示人脸框、身份和相似度时运行：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app monitor --source picamera2
+```
+
+持续预览不会保存视频或截图。绿色框表示已识别注册人员，红色框表示陌生人，
+黄色文字表示识别中、未检测到人脸、多人或画面质量不足。按`q`退出。
+姓名使用系统中文字体绘制；没有中文字体时会退化为ASCII占位字符。
+
 ### USB摄像头
 
 先查看设备：
