@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .camera import OpenCVCamera, Picamera2Camera
 from .config import AppConfig, load_config
-from .decision import MultiFrameDecision
+from .decision import ContinuousDecision, MultiFrameDecision
 from .metrics import summarize_latencies
 from .templates import TemplateStore
 from .types import FrameObservation, IdentityResult, IdentityStatus
@@ -118,6 +118,82 @@ def run_live(source: str, device: str, display: bool, config: AppConfig, root: P
     return 4
 
 
+class OverlayRenderer:
+    def __init__(self, cv2):
+        self.cv2 = cv2
+        self.font = None
+        font_path = Path("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf")
+        if hasattr(cv2, "freetype") and font_path.is_file():
+            self.font = cv2.freetype.createFreeType2()
+            self.font.loadFontData(fontFileName=str(font_path), idx=0)
+
+    def put_text(self, frame, text: str, origin: tuple[int, int], color, height: int = 24) -> None:
+        if self.font is not None:
+            self.font.putText(frame, text, origin, height, color, 1, self.cv2.LINE_AA, True)
+            return
+        ascii_text = text.encode("ascii", "replace").decode("ascii")
+        self.cv2.putText(
+            frame,
+            ascii_text,
+            origin,
+            self.cv2.FONT_HERSHEY_SIMPLEX,
+            height / 32.0,
+            color,
+            2,
+            self.cv2.LINE_AA,
+        )
+
+
+def monitor_label(observation: FrameObservation, result: IdentityResult) -> tuple[str, tuple[int, int, int]]:
+    score = "" if observation.similarity is None else f"  {observation.similarity:.3f}"
+    if result.status == IdentityStatus.MATCHED:
+        return f"已识别：{result.user_id}{score}", (0, 220, 0)
+    if result.status == IdentityStatus.UNKNOWN:
+        return f"未识别：陌生人{score}", (0, 0, 255)
+    reasons = {
+        "no_face": "未检测到人脸",
+        "multiple_faces": "检测到多人",
+        "too_dark": "画面太暗",
+        "too_bright": "画面过亮",
+        "too_blurry": "画面模糊",
+        "face_too_small": "请靠近摄像头",
+        "poor_quality": "画面质量不足",
+    }
+    if result.reason in reasons:
+        return reasons[result.reason], (0, 165, 255)
+    return f"识别中…{score}", (0, 220, 255)
+
+
+def monitor_live(source: str, device: str, config: AppConfig, root: Path) -> int:
+    import cv2
+
+    profile = TemplateStore(root / config.profile_path).load()
+    engine = build_engine(config, root)
+    decision = ContinuousDecision(config.decision)
+    renderer = OverlayRenderer(cv2)
+    camera = open_camera(source, device, config)
+    window_name = "FaceBox Live Recognition - q to quit"
+    try:
+        for frame in camera.frames():
+            observation = engine.observe(frame, profile)
+            result = decision.update(observation)
+            label, color = monitor_label(observation, result)
+            if observation.face_box is not None:
+                x, y, width, height = observation.face_box
+                x, y = max(0, x), max(0, y)
+                cv2.rectangle(frame, (x, y), (x + width, y + height), color, 2)
+                renderer.put_text(frame, label, (x, max(28, y - 8)), color)
+            else:
+                renderer.put_text(frame, label, (20, 35), color)
+            cv2.imshow(window_name, frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                return 0
+    finally:
+        camera.close()
+        cv2.destroyAllWindows()
+    return 0
+
+
 def benchmark_live(source: str, device: str, trials: int, config: AppConfig, root: Path) -> int:
     if trials < 1:
         raise ValueError("trials must be positive")
@@ -179,6 +255,9 @@ def parser() -> argparse.ArgumentParser:
     live.add_argument("--source", choices=["picamera2", "opencv"], default="picamera2")
     live.add_argument("--device", default="0")
     live.add_argument("--display", action="store_true")
+    monitor = commands.add_parser("monitor")
+    monitor.add_argument("--source", choices=["picamera2", "opencv"], default="picamera2")
+    monitor.add_argument("--device", default="0")
     benchmark = commands.add_parser("benchmark")
     benchmark.add_argument("--source", choices=["picamera2", "opencv"], default="picamera2")
     benchmark.add_argument("--device", default="0")
@@ -199,6 +278,8 @@ def main() -> int:
             return enroll(arguments.images, config, root, arguments.minimum)
         if arguments.command == "run":
             return run_live(arguments.source, arguments.device, arguments.display, config, root)
+        if arguments.command == "monitor":
+            return monitor_live(arguments.source, arguments.device, config, root)
         if arguments.command == "benchmark":
             return benchmark_live(arguments.source, arguments.device, arguments.trials, config, root)
         return self_check(config, root)
