@@ -63,6 +63,31 @@ class MultiFrameDecisionTests(unittest.TestCase):
         self.assertEqual(result.status, IdentityStatus.RETRY)
         self.assertEqual(result.reason, "timeout")
 
+    def test_disappearance_still_times_out(self):
+        self.engine.update(FrameObservation(10, 1, True, 0.8))
+        result = self.engine.update(FrameObservation(13, 0, False, None))
+        self.assertEqual(result.reason, "timeout")
+        self.assertEqual(result.latency_seconds, 3)
+
+    def test_processing_time_can_expire_session(self):
+        result = self.engine.update(FrameObservation(10, 1, True, 0.8, processed_at=13.1))
+        self.assertEqual(result.reason, "timeout")
+
+    def test_final_inference_included_in_latency(self):
+        self.engine.update(FrameObservation(10, 1, True, 0.8, processed_at=10.2))
+        self.engine.update(FrameObservation(10.3, 1, True, 0.8, processed_at=10.5))
+        result = self.engine.update(FrameObservation(10.6, 1, True, 0.8, processed_at=10.9))
+        self.assertEqual(result.status, IdentityStatus.MATCHED)
+        self.assertAlmostEqual(result.latency_seconds, 0.9)
+
+    def test_disappearance_discards_old_votes(self):
+        self.engine.update(FrameObservation(10, 1, True, 0.8))
+        self.engine.update(FrameObservation(10.1, 1, True, 0.8))
+        self.engine.update(FrameObservation(10.2, 0, False, None))
+        result = self.engine.update(FrameObservation(10.3, 1, True, 0.8))
+        self.assertEqual(result.status, IdentityStatus.WAITING)
+        self.assertEqual(result.matching_frames, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

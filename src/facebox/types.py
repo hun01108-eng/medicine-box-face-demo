@@ -18,6 +18,7 @@ class FrameObservation:
     quality_ok: bool
     similarity: Optional[float]
     quality_reason: str = ""
+    processed_at: Optional[float] = None
 
 
 @dataclass(frozen=True)
