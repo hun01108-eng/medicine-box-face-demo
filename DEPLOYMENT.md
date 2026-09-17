@@ -49,3 +49,9 @@ cd /home/pi/medicine-box/current
 当前没有旧部署版本。保留原 ZIP 及配置备份。
 以后回退仅切换 current 到经过验证的旧版本，data 不随代码回退。
 系统依赖安装不会由代码回退自动卸载，避免影响相机环境。
+# 红外模块附加依赖
+
+红外经过检测需要 `python3-serial`，并通过独立 USB 串口向 Uno 发送
+`PERSON_IN\n`。部署前使用 `/dev/serial/by-id/` 记录红外模块和 Uno 的稳定
+设备路径，避免把两个串口接反。红外运行日志放在共享的 `logs/` 目录，不应
+提交到 Git。

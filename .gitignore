@@ -5,3 +5,4 @@ enrollment_images/*
 !enrollment_images/README.md
 data/*.json
 *.log
+logs/*.csv

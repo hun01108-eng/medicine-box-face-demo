@@ -184,6 +184,13 @@ def parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--device", default="0")
     benchmark.add_argument("--trials", type=int, default=20)
     commands.add_parser("self-check")
+    thermal = commands.add_parser(
+        "thermal-monitor",
+        help="detect a passing person with MLX90642 and notify an Arduino Uno",
+    )
+    from .thermal_app import add_thermal_arguments
+
+    add_thermal_arguments(thermal)
     return result
 
 
@@ -201,8 +208,12 @@ def main() -> int:
             return run_live(arguments.source, arguments.device, arguments.display, config, root)
         if arguments.command == "benchmark":
             return benchmark_live(arguments.source, arguments.device, arguments.trials, config, root)
+        if arguments.command == "thermal-monitor":
+            from .thermal_app import run_thermal_monitor
+
+            return run_thermal_monitor(arguments)
         return self_check(config, root)
-    except (FileNotFoundError, RuntimeError, ValueError) as error:
+    except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
         print(json.dumps({"status": "ERROR", "reason": str(error)}, ensure_ascii=False))
         return 4
 

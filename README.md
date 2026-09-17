@@ -322,3 +322,34 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 - [OpenCV Zoo：YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
 - [OpenCV Zoo：SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)
 - [树莓派Picamera2说明文档](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf)
+
+## 十四、红外经过检测与 Uno 通知
+
+仓库现在同时包含 MLX90642-mini 红外阵列的人体经过检测。红外模块和
+OV5647 人脸摄像头相互独立：人脸识别命令保持不变，红外检测通过 USB
+串口读取 24×32 温度帧，并在确认有人经过时向 Arduino Uno 发送：
+
+```text
+PERSON_IN\n
+```
+
+Uno 可返回 `ACK\n`。树莓派无论是否收到 ACK 都会把事件和确认结果写入
+`logs/person_events.csv`，但同一个人停留期间不会反复发送。
+
+树莓派建议使用 `/dev/serial/by-id/` 下的稳定路径区分红外模块和 Uno：
+
+```bash
+ls -l /dev/serial/by-id/
+PYTHONPATH=src python3 -m facebox.app thermal-monitor \
+  --thermal-port /dev/serial/by-id/<thermal-device> \
+  --uno-port /dev/serial/by-id/<uno-device>
+```
+
+无硬件时可以验证状态机和日志：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
+```
+
+当前红外算法是背景差分和热斑检测，不是人脸定位或医用测温。`offset`、
+温度门槛和面积范围必须在实际安装距离与环境中重新标定。
