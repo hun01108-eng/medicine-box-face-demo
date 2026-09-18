@@ -191,6 +191,12 @@ def parser() -> argparse.ArgumentParser:
     from .thermal_app import add_thermal_arguments
 
     add_thermal_arguments(thermal)
+    flu_status = commands.add_parser("flu-status", help="read the latest flu risk from the cloud API")
+    flu_monitor = commands.add_parser("flu-monitor", help="poll the cloud flu risk API and keep a local cache")
+    from .flu_app import add_flu_arguments
+
+    add_flu_arguments(flu_status)
+    add_flu_arguments(flu_monitor, monitor=True)
     return result
 
 
@@ -212,6 +218,12 @@ def main() -> int:
             from .thermal_app import run_thermal_monitor
 
             return run_thermal_monitor(arguments)
+        if arguments.command in {"flu-status", "flu-monitor"}:
+            from .flu_app import run_flu_monitor, run_flu_status
+
+            if arguments.command == "flu-status":
+                return run_flu_status(arguments, config, root)
+            return run_flu_monitor(arguments, config, root)
         return self_check(config, root)
     except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
         print(json.dumps({"status": "ERROR", "reason": str(error)}, ensure_ascii=False))
