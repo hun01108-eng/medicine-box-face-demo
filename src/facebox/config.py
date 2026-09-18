@@ -7,6 +7,14 @@ from .quality import QualityConfig
 
 
 @dataclass(frozen=True)
+class FluApiConfig:
+    base_url: str = "http://192.144.163.230"
+    timeout_seconds: float = 10.0
+    poll_interval_seconds: float = 3600.0
+    cache_path: str = "data/flu_risk_cache.json"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     detector_model: str = "models/face_detection_yunet_2023mar.onnx"
     recognizer_model: str = "models/face_recognition_sface_2021dec.onnx"
@@ -19,10 +27,12 @@ class AppConfig:
     use_clahe: bool = True
     decision: DecisionConfig = field(default_factory=DecisionConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
+    flu_api: FluApiConfig = field(default_factory=FluApiConfig)
 
 
 def load_config(path: Path) -> AppConfig:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     decision = DecisionConfig(**payload.pop("decision", {}))
     quality = QualityConfig(**payload.pop("quality", {}))
-    return AppConfig(decision=decision, quality=quality, **payload)
+    flu_api = FluApiConfig(**payload.pop("flu_api", {}))
+    return AppConfig(decision=decision, quality=quality, flu_api=flu_api, **payload)

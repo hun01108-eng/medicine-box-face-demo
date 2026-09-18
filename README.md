@@ -353,3 +353,36 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 
 当前红外算法是背景差分和热斑检测，不是人脸定位或医用测温。`offset`、
 温度门槛和面积范围必须在实际安装距离与环境中重新标定。
+
+## 十五、云端流感风险 API
+
+流感网站继续在云服务器上完成官网 PDF 下载、周报入库、DeepSeek 分析和网页展示。
+树莓派只读取网站的只读接口 `/api/weekly`，不保存 DeepSeek API Key，也不在本地
+重复生成月报。这样人脸图像和模板留在设备内，流感数据仍由云端统一维护。
+
+三个功能使用同一个 CLI，但保持彼此独立，单项故障不会阻塞其他传感器：
+
+```text
+OV5647 -> facebox run          -> 身份结果
+MLX90642 -> thermal-monitor    -> PERSON_IN / Uno
+云端网站 -> flu-status/monitor -> 高、中、低风险 + 本地缓存
+```
+
+单次读取当前风险：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app flu-status
+```
+
+常驻轮询（默认每小时一次，只在内容变化时输出）：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app flu-monitor
+```
+
+接口地址、超时、轮询间隔和缓存位置在 `config.json` 的 `flu_api` 节配置；临时切换
+服务器可设置 `FLU_API_BASE_URL` 或使用 `--api-base-url`。云端断开时输出中的
+`source` 为 `cache` 且 `stale` 为 `true`，调用方必须把它显示为缓存数据。
+
+当前服务器使用 HTTP，适合先完成局域/演示联调；正式公网使用时应配置域名和 HTTPS。
+风险等级目前只输出和缓存，不会自动修改药物、剂量，也不会擅自触发 Uno 动作。

@@ -336,3 +336,34 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 
 按 `Ctrl+C` 停止。红外检测与人脸实时预览是两个独立进程，可分别启动；
 红外模块不会修改人脸模板，也不会保存可见光或红外图像。
+
+## 14. 接入云端流感风险
+
+该功能仅使用 Python 标准库，不需要在树莓派额外安装 HTTP 包，也不需要把
+DeepSeek API Key 放到设备上。确认树莓派可以访问云服务器后，先执行一次：
+
+```bash
+cd /home/pi/medicine-box/current
+PYTHONPATH=src python3 -m facebox.app flu-status
+```
+
+指定月份或临时服务器地址：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app flu-status --month 2026-08
+PYTHONPATH=src python3 -m facebox.app flu-status --api-base-url http://192.144.163.230
+```
+
+持续轮询：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app flu-monitor --interval 3600
+```
+
+成功输出 `FLU_RISK`，字段 `risk_level` 为 `高`、`中`或`低`。断网时程序读取
+`data/flu_risk_cache.json`，并输出 `"source":"cache","stale":true`；如果从未
+成功联网且没有缓存，则输出 `ERROR`。若要禁止使用缓存，加 `--no-cache`。
+
+人脸识别、红外检测和流感轮询建议先在三个终端分别运行并验收。仓库暂不自动
+安装 systemd 服务，也不自动把风险等级发送给 Uno；这两项应在树莓派实测和
+通信协议确认后再启用。
