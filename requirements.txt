@@ -2,3 +2,4 @@
 # USB摄像头或非树莓派Linux虚拟环境可使用：
 numpy>=1.24
 opencv-contrib-python>=4.8,<5
+pyserial>=3.5

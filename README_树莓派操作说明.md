@@ -290,3 +290,49 @@ PYTHONPATH=src python3 -m facebox.app benchmark \
 5. 多位陌生人误放行测试；
 6. 20次实机P95延迟；
 7. 摄像头实际安装距离和OV5647固定焦点清晰度。
+
+## 13. 红外经过检测通知 Uno
+
+安装串口依赖并将运行用户加入串口组：
+
+```bash
+sudo apt install -y python3-serial
+sudo usermod -aG dialout pi
+```
+
+组权限修改后需要注销重新登录或重启。用稳定设备名区分两个 USB 串口：
+
+```bash
+ls -l /dev/serial/by-id/
+```
+
+启动命令：
+
+```bash
+cd /home/pi/medicine-box/current
+PYTHONPATH=src python3 -m facebox.app thermal-monitor \
+  --thermal-port /dev/serial/by-id/<MLX90642设备> \
+  --uno-port /dev/serial/by-id/<Arduino-Uno设备>
+```
+
+通信协议为一行 ASCII 文本：树莓派发送 `PERSON_IN\n`，Uno播放语音后返回
+`ACK\n`。一次进入事件只发送一次；热斑消失、检测器复位且冷却结束后，下一次
+进入才会再次发送。事件日志默认写入 `logs/person_events.csv`。
+
+常用参数：
+
+- `--thermal-baud 921600`：红外模块波特率；
+- `--uno-baud 9600`：Uno通信波特率；
+- `--confirm-seconds 0.6`：热斑持续多久才确认有人；
+- `--clear-seconds 1.5`：人离开多久后复位；
+- `--cooldown-seconds 3.0`：两次通知的最短间隔；
+- `--offset 4.0`：仅用于日志显示的温度校准值，不参与人体检测。
+
+先运行无硬件模拟测试：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
+```
+
+按 `Ctrl+C` 停止。红外检测与人脸实时预览是两个独立进程，可分别启动；
+红外模块不会修改人脸模板，也不会保存可见光或红外图像。
