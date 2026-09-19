@@ -13,12 +13,16 @@ import re
 import sys
 import time
 import random
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
-import pdfplumber
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 
 from database import ORIGINAL_REPORT_DIR, ensure_schema, save_weekly_report
 
@@ -142,11 +146,21 @@ def extract_data_from_pdf(pdf_path, report_date=None):
         return None
     full_text = ""
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    full_text += text + "\n"
+        if pdfplumber is not None:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    text = page.extract_text()
+                    if text:
+                        full_text += text + "\n"
+        else:
+            completed = subprocess.run(
+                ["pdftotext", "-layout", str(pdf_path), "-"],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            full_text = completed.stdout
     except Exception as e:
         print(f"❌ 读取 PDF 失败: {e}")
         return None
