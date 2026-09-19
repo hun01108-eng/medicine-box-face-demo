@@ -120,4 +120,3 @@ def save_weekly_report(data, detail_url, pdf_url, pdf_path, report_date):
 
 
 ensure_schema()
-

@@ -3,4 +3,3 @@ Flask
 openai
 pdfplumber
 requests
-

@@ -45,7 +45,7 @@ def get_latest_pdf_info():
         print(f"❌ 访问列表页失败: {resp.status_code}")
         return None
     soup = BeautifulSoup(resp.text, "html.parser")
-    
+
     # 找最新周报链接
     week_link = None
     week_text = None
@@ -60,7 +60,7 @@ def get_latest_pdf_info():
         print("❌ 未找到周报链接")
         return None
     print(f"📄 找到最新: {week_text}")
-    
+
     # 补全详情页 URL
     if week_link.startswith("./"):
         detail_url = BASE_URL + week_link[2:]
@@ -69,10 +69,10 @@ def get_latest_pdf_info():
     else:
         detail_url = BASE_URL + week_link
     print(f"   🔗 详情页: {detail_url}")
-    
+
     # 模拟人类停顿
     time.sleep(random.uniform(2, 5))
-    
+
     # 访问详情页
     detail_resp = session.get(detail_url, headers=BASE_HEADERS, timeout=30)
     detail_resp.encoding = "utf-8"
@@ -80,7 +80,7 @@ def get_latest_pdf_info():
         print(f"❌ 访问详情页失败: {detail_resp.status_code}")
         return None
     detail_soup = BeautifulSoup(detail_resp.text, "html.parser")
-    
+
     # 提取 PDF 链接（相对路径，如 "./P020260903555272906874.pdf"）
     pdf_link = None
     pdf_name = None
@@ -94,7 +94,7 @@ def get_latest_pdf_info():
     if not pdf_link:
         print("❌ 未找到 PDF 下载链接")
         return None
-    
+
     # ========== 关键修复：正确拼接 PDF URL，保留月份目录 ==========
     # 示例：pdf_link = "./P020260903555272906874.pdf"
     #       detail_url = "https://.../lgzb/202609/t20260903_1839795.htm"
@@ -108,10 +108,10 @@ def get_latest_pdf_info():
         pdf_url = "https://ivdc.chinacdc.cn" + pdf_link
     else:
         pdf_url = BASE_URL + pdf_link
-    
+
     print(f"   📄 PDF名称: {pdf_name}")
     print(f"   🔗 PDF链接: {pdf_url}")
-    
+
     return detail_url, pdf_url, pdf_name
 
 
@@ -354,4 +354,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

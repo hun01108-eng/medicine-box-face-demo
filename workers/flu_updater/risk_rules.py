@@ -34,4 +34,3 @@ def assess_weekly_risk(data):
     if medium_reasons:
         return "中", "；".join(medium_reasons)
     return "低", "未触发周风险规则"
-
