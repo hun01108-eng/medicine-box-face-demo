@@ -168,19 +168,23 @@ def extract_data_from_pdf(pdf_path, report_date=None):
         print("❌ 未从 PDF 中提取到任何文字")
         return None
 
-    # 阳性率
-    south_match = re.search(r'阳性数\(%\)\s+(\d+)\(([\d.]+)%\)', full_text)
-    if not south_match:
-        south_match = re.search(r'南方省份.*?阳性数\(%\).*?(\d+)\(([\d.]+)%\)', full_text, re.DOTALL)
-    south_rate = float(south_match.group(2)) if south_match else None
-
-    north_match = re.search(r'60\(([\d.]+)%\)', full_text)
-    if not north_match:
-        north_match = re.search(r'北方省份.*?阳性数\(%\).*?(\d+)\(([\d.]+)%\)', full_text, re.DOTALL)
-    if north_match:
-        north_rate = float(north_match.group(2)) if len(north_match.groups()) >= 2 else float(north_match.group(1))
+    # 阳性率：表格中依次为南方、北方和合计，不能依赖某一周的固定阳性数。
+    rates_match = re.search(
+        r'阳性数\(%\)\s+\d+\(([\d.]+)%\)\s+\d+\(([\d.]+)%\)',
+        full_text,
+    )
+    if rates_match:
+        south_rate = float(rates_match.group(1))
+        north_rate = float(rates_match.group(2))
     else:
-        north_rate = None
+        south_match = re.search(
+            r'南方省份.*?阳性数\(%\).*?\d+\(([\d.]+)%\)', full_text, re.DOTALL
+        )
+        north_match = re.search(
+            r'北方省份.*?阳性数\(%\).*?\d+\(([\d.]+)%\)', full_text, re.DOTALL
+        )
+        south_rate = float(south_match.group(1)) if south_match else None
+        north_rate = float(north_match.group(1)) if north_match else None
 
     outbreak_match = re.search(r'全国(?:未报告|共报告\s*([\d]+)\s*起)\s*流感样病例暴发疫情', full_text)
     if outbreak_match:
@@ -188,7 +192,7 @@ def extract_data_from_pdf(pdf_path, report_date=None):
     else:
         outbreak = None
 
-    week_match = re.search(r'第(\d+)周', full_text)
+    week_match = re.search(r'第\s*(\d+)\s*周', full_text)
     report_year = report_date[:4] if report_date else str(datetime.now().year)
     report_week = f"{report_year}-W{int(week_match.group(1)):02d}" if week_match else None
 
