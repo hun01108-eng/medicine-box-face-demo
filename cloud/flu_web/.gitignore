@@ -1,0 +1,5 @@
+__pycache__/
+.packages/
+*.pyc
+flu_data.db
+reports/original/*.pdf

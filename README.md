@@ -230,6 +230,8 @@ flowchart TD
 
 ```text
 medicine-box-face-demo/
+├── cloud/flu_web/              云端网页、数据库接口与受保护接收端
+├── workers/flu_updater/        树莓派官网周报下载、解析和上传任务
 ├── README.md                    项目思路、方案与程序逻辑
 ├── README_树莓派操作说明.md       安装、注册、运行和测试命令
 ├── config.json                 模型、摄像头、质量与决策参数
