@@ -19,6 +19,8 @@ class AppConfig:
     detector_model: str = "models/face_detection_yunet_2023mar.onnx"
     recognizer_model: str = "models/face_recognition_sface_2021dec.onnx"
     profile_path: str = "data/elder_001.json"
+    camera_source: str = "opencv"
+    camera_device: str = "/dev/video0"
     camera_width: int = 640
     camera_height: int = 480
     detector_score_threshold: float = 0.85

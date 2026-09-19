@@ -1,6 +1,6 @@
 # 树莓派第一阶段部署
 
-目标：Raspberry Pi 4B 4GB，Debian 13 aarch64，OV5647。
+目标：Raspberry Pi 4B 4GB，Debian 13 aarch64，USB 摄像头。
 基线：用户提供的 medicine-box-face-demo-main.zip，原 ZIP 保留在电脑。
 
 ## 存储
@@ -11,12 +11,12 @@ current 在硬件测试通过后指向本版本。
 data、enrollment、logs、backups 与版本目录分离，目录权限 700。
 本版本 data 和 enrollment 为链接；模板仍保存为 data/elder_001.json。
 模型文件随版本保留，每版约 37MiB，配置备份到 backups。
-独立 .venv 使用 --system-site-packages 复用系统 Picamera2、NumPy、OpenCV。
+独立 .venv 使用 --system-site-packages 复用系统 NumPy 和 OpenCV。
 
 ## 本版修正
 
-- Picamera2 请求 RGB888，得到 OpenCV 使用的 BGR 字节顺序。
-  参考：https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf
+- 默认通过 OpenCV VideoCapture 读取 `/dev/video0`；可在 `config.json` 修改
+  `camera_device`，也可在命令行使用 `--device` 临时覆盖。
 - 会话启动后，无脸帧也执行超时检查；无脸时清空旧匹配票数。
 - 帧处理完成时间参与决策及耗时统计，避免漏计最后一次推理。
 - 达到 3 秒时返回 timeout；没有出现过人脸则继续等待。

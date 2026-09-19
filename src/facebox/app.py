@@ -176,12 +176,12 @@ def parser() -> argparse.ArgumentParser:
     enrollment.add_argument("--images", type=Path, required=True)
     enrollment.add_argument("--minimum", type=int, default=5)
     live = commands.add_parser("run")
-    live.add_argument("--source", choices=["picamera2", "opencv"], default="picamera2")
-    live.add_argument("--device", default="0")
+    live.add_argument("--source", choices=["picamera2", "opencv"], help="defaults to config camera_source")
+    live.add_argument("--device", help="defaults to config camera_device")
     live.add_argument("--display", action="store_true")
     benchmark = commands.add_parser("benchmark")
-    benchmark.add_argument("--source", choices=["picamera2", "opencv"], default="picamera2")
-    benchmark.add_argument("--device", default="0")
+    benchmark.add_argument("--source", choices=["picamera2", "opencv"], help="defaults to config camera_source")
+    benchmark.add_argument("--device", help="defaults to config camera_device")
     benchmark.add_argument("--trials", type=int, default=20)
     commands.add_parser("self-check")
     thermal = commands.add_parser(
@@ -211,9 +211,21 @@ def main() -> int:
         if arguments.command == "enroll":
             return enroll(arguments.images, config, root, arguments.minimum)
         if arguments.command == "run":
-            return run_live(arguments.source, arguments.device, arguments.display, config, root)
+            return run_live(
+                arguments.source or config.camera_source,
+                arguments.device or config.camera_device,
+                arguments.display,
+                config,
+                root,
+            )
         if arguments.command == "benchmark":
-            return benchmark_live(arguments.source, arguments.device, arguments.trials, config, root)
+            return benchmark_live(
+                arguments.source or config.camera_source,
+                arguments.device or config.camera_device,
+                arguments.trials,
+                config,
+                root,
+            )
         if arguments.command == "thermal-monitor":
             from .thermal_app import run_thermal_monitor
 

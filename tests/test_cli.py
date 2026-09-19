@@ -5,6 +5,9 @@ import sys
 import unittest
 from pathlib import Path
 
+from facebox.app import parser
+from facebox.config import AppConfig
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,6 +46,14 @@ class CliTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["status"], "UNKNOWN_RETRY")
         self.assertEqual(payload["reason"], "too_dark")
+
+    def test_usb_camera_is_the_default(self):
+        arguments = parser().parse_args(["run"])
+        config = AppConfig()
+        self.assertIsNone(arguments.source)
+        self.assertIsNone(arguments.device)
+        self.assertEqual(config.camera_source, "opencv")
+        self.assertEqual(config.camera_device, "/dev/video0")
 
 
 if __name__ == "__main__":

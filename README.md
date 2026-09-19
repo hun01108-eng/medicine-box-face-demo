@@ -161,7 +161,7 @@ flowchart TD
 - 避免摄像头正对窗户；
 - 让老人脸部在画面中占有足够像素；
 - 可增加柔和白光补光和扩散罩；
-- 如果使用固定焦点OV5647，必须实测安装距离下的人脸清晰度。
+- 默认使用 USB 摄像头 `/dev/video0`；必须实测安装距离下的人脸清晰度。
 
 ### 2. 注册数据
 
@@ -296,7 +296,7 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 
 - 单人开放集决策框架；
 - YuNet＋SFace接口；
-- Picamera2和USB摄像头适配层；
+- 默认 USB 摄像头输入，同时保留 Picamera2 兼容适配层；
 - 多光照注册模板支持；
 - 图像质量门禁；
 - 多帧确认和3秒超时；
@@ -308,7 +308,7 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 
 待树莓派实机完成：
 
-1. 确认摄像头型号和Picamera2取帧；
+1. 确认 USB 摄像头设备名并验证 `/dev/video0` 取帧；
 2. 采集老人多光照注册样本；
 3. 使用老人和多位陌生人数据标定阈值；
 4. 测试明亮、普通、较暗、侧光和逆光；
@@ -326,7 +326,7 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 ## 十四、红外经过检测与 Uno 通知
 
 仓库现在同时包含 MLX90642-mini 红外阵列的人体经过检测。红外模块和
-OV5647 人脸摄像头相互独立：人脸识别命令保持不变，红外检测通过 USB
+USB 人脸摄像头相互独立：人脸识别命令保持不变，红外检测通过 USB
 串口读取 24×32 温度帧，并在确认有人经过时向 Arduino Uno 发送：
 
 ```text
@@ -363,7 +363,7 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 三个功能使用同一个 CLI，但保持彼此独立，单项故障不会阻塞其他传感器：
 
 ```text
-OV5647 -> facebox run          -> 身份结果
+USB摄像头 -> facebox run       -> 身份结果
 MLX90642 -> thermal-monitor    -> PERSON_IN / Uno
 云端网站 -> flu-status/monitor -> 高、中、低风险 + 本地缓存
 ```
