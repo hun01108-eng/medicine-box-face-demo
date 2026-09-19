@@ -18,6 +18,11 @@ THERMAL_BAUD = 921600
 UNO_BAUD = 9600
 EDGE_MARGIN = 3
 PERSON_COMMAND = b"PERSON_IN\n"
+RISK_AUDIO_COMMANDS = {
+    "高": b"0009\n",
+    "中": b"0010\n",
+    "低": b"0011\n",
+}
 
 
 def parse_frame(buffer: bytes):
@@ -250,7 +255,7 @@ class ThermalSerialReader:
 
 
 class UnoNotifier:
-    """Send the agreed newline-delimited PERSON_IN command to an Arduino Uno."""
+    """Send newline-delimited commands to an Arduino Uno R3."""
 
     def __init__(
         self,
@@ -267,11 +272,24 @@ class UnoNotifier:
         self.serial = serial_factory(port, baud, timeout=0.5)
         sleep(reset_delay)
 
-    def notify_person(self) -> bool:
-        self.serial.write(PERSON_COMMAND)
+    def notify(self, command: bytes) -> bool:
+        if not command.endswith(b"\n") or not command[:-1].decode("ascii").isdigit():
+            if command != PERSON_COMMAND:
+                raise ValueError("Uno command must be ASCII digits followed by a newline")
+        self.serial.write(command)
         self.serial.flush()
         reply = self.serial.readline().decode("ascii", errors="ignore").strip()
         return reply == "ACK"
+
+    def notify_person(self) -> bool:
+        return self.notify(PERSON_COMMAND)
+
+    def notify_risk(self, risk_level: str) -> tuple[str, bool]:
+        try:
+            command = RISK_AUDIO_COMMANDS[risk_level]
+        except KeyError as error:
+            raise ValueError(f"unsupported flu risk level: {risk_level}") from error
+        return command.decode("ascii").strip(), self.notify(command)
 
     def close(self) -> None:
         self.serial.close()

@@ -7,6 +7,7 @@ from facebox.thermal import (
     FRAME_LEN,
     HEADER,
     PERSON_COMMAND,
+    RISK_AUDIO_COMMANDS,
     ROWS,
     ThermalPersonDetector,
     UnoNotifier,
@@ -83,6 +84,29 @@ class ThermalTests(unittest.TestCase):
         self.assertEqual(bytes(fake.written), PERSON_COMMAND)
         notifier.close()
         self.assertTrue(fake.closed)
+
+    def test_uno_notifier_sends_three_risk_audio_numbers(self):
+        for risk_level, expected in RISK_AUDIO_COMMANDS.items():
+            with self.subTest(risk_level=risk_level):
+                fake = FakeSerial()
+                notifier = UnoNotifier(
+                    "test", serial_factory=lambda *_args, **_kwargs: fake, reset_delay=0
+                )
+                code, acknowledged = notifier.notify_risk(risk_level)
+                self.assertTrue(acknowledged)
+                self.assertEqual(code, expected.decode("ascii").strip())
+                self.assertEqual(bytes(fake.written), expected)
+                notifier.close()
+
+    def test_uno_notifier_rejects_unknown_risk(self):
+        fake = FakeSerial()
+        notifier = UnoNotifier(
+            "test", serial_factory=lambda *_args, **_kwargs: fake, reset_delay=0
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported flu risk level"):
+            notifier.notify_risk("未知")
+        self.assertEqual(bytes(fake.written), b"")
+        notifier.close()
 
 
 if __name__ == "__main__":

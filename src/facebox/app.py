@@ -276,6 +276,10 @@ def parser() -> argparse.ArgumentParser:
 
     add_flu_arguments(flu_status)
     add_flu_arguments(flu_monitor, monitor=True)
+    flu_audio = commands.add_parser("flu-audio", help="send the weekly risk audio number to an Uno R3")
+    from .flu_app import add_flu_audio_arguments
+
+    add_flu_audio_arguments(flu_audio)
     return result
 
 
@@ -316,11 +320,13 @@ def main() -> int:
             from .thermal_app import run_thermal_monitor
 
             return run_thermal_monitor(arguments)
-        if arguments.command in {"flu-status", "flu-monitor"}:
-            from .flu_app import run_flu_monitor, run_flu_status
+        if arguments.command in {"flu-status", "flu-monitor", "flu-audio"}:
+            from .flu_app import run_flu_audio, run_flu_monitor, run_flu_status
 
             if arguments.command == "flu-status":
                 return run_flu_status(arguments, config, root)
+            if arguments.command == "flu-audio":
+                return run_flu_audio(arguments, config, root)
             return run_flu_monitor(arguments, config, root)
         return self_check(config, root)
     except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:
