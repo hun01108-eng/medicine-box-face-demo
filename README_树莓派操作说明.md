@@ -304,9 +304,10 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor \
   --uno-port /dev/serial/by-id/<Arduino-Uno设备>
 ```
 
-通信协议为一行 ASCII 文本：树莓派发送 `PERSON_IN\n`，Uno播放语音后返回
-`ACK\n`。一次进入事件只发送一次；热斑消失、检测器复位且冷却结束后，下一次
-进入才会再次发送。事件日志默认写入 `logs/person_events.csv`。
+通信协议为一行 ASCII 数字加换行：检测到有人经过先发送 `0004\n`，默认等待
+2秒，再按测温结果发送体温过高 `0007\n` 或体温正常 `0008\n`。Uno播放语音后
+可返回 `ACK\n`。一次进入事件只发送一次；热斑消失、检测器复位且冷却结束后，
+下一次进入才会再次发送。事件日志默认写入 `logs/person_events.csv`。
 
 常用参数：
 
@@ -316,6 +317,8 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor \
 - `--clear-seconds 1.5`：人离开多久后复位；
 - `--cooldown-seconds 3.0`：两次通知的最短间隔；
 - `--offset 4.0`：仅用于日志显示的温度校准值，不参与人体检测。
+- `--high-temperature 37.3`：判断体温过高的门槛，部署前必须实测校准；
+- `--audio-gap-seconds 2.0`：`0004` 与体温播报之间的间隔。
 
 先运行无硬件模拟测试：
 
@@ -325,6 +328,17 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 
 按 `Ctrl+C` 停止。红外检测与人脸实时预览是两个独立进程，可分别启动；
 红外模块不会修改人脸模板，也不会保存可见光或红外图像。
+
+人脸实时预览接入同一 Uno R3：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app monitor \
+  --source opencv --device /dev/video0 \
+  --uno-port /dev/serial/by-id/<Arduino-Uno设备>
+```
+
+识别成功发送 `0005\n`，陌生人识别失败发送 `0006\n`。同一张脸持续停留时只
+发送一次，脸离开画面后才会允许下一次播报。多个进程的串口写入由文件锁串行化。
 
 ## 14. 接入云端流感风险
 
@@ -353,6 +367,6 @@ PYTHONPATH=src python3 -m facebox.app flu-monitor --interval 3600
 `data/flu_risk_cache.json`，并输出 `"source":"cache","stale":true`；如果从未
 成功联网且没有缓存，则输出 `ERROR`。若要禁止使用缓存，加 `--no-cache`。
 
-人脸识别、红外检测和流感轮询建议先在三个终端分别运行并验收。仓库暂不自动
-安装 systemd 服务，也不自动把风险等级发送给 Uno；这两项应在树莓派实测和
-通信协议确认后再启用。
+人脸识别、红外检测和流感轮询建议先在三个终端分别运行并验收。每周一10点的
+流感更新服务会在更新成功后把高、中、低风险分别发送为 `0009\n`、`0010\n`、
+`0011\n`，同一周默认只发送一次。

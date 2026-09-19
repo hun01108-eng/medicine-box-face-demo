@@ -4,6 +4,7 @@ import numpy as np
 
 from facebox.thermal import (
     COLS,
+    EVENT_AUDIO_COMMANDS,
     FRAME_LEN,
     HEADER,
     PERSON_COMMAND,
@@ -97,6 +98,34 @@ class ThermalTests(unittest.TestCase):
                 self.assertEqual(code, expected.decode("ascii").strip())
                 self.assertEqual(bytes(fake.written), expected)
                 notifier.close()
+
+    def test_uno_notifier_sends_face_and_thermal_audio_numbers(self):
+        fake = FakeSerial()
+        sleeps = []
+        notifier = UnoNotifier(
+            "test",
+            serial_factory=lambda *_args, **_kwargs: fake,
+            reset_delay=0,
+            sleep=sleeps.append,
+        )
+        results = notifier.notify_event_sequence(
+            [
+                "person_passed",
+                "temperature_high",
+                "face_matched",
+                "face_failed",
+                "temperature_normal",
+            ],
+            gap_seconds=0.25,
+        )
+        self.assertTrue(all(acknowledged for _code, acknowledged in results))
+        self.assertEqual(sleeps, [0, 0.25, 0.25, 0.25, 0.25])
+        self.assertEqual(
+            bytes(fake.written),
+            b"0004\n0007\n0005\n0006\n0008\n",
+        )
+        self.assertEqual(EVENT_AUDIO_COMMANDS["person_passed"], b"0004\n")
+        notifier.close()
 
     def test_uno_notifier_rejects_unknown_risk(self):
         fake = FakeSerial()

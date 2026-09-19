@@ -18,6 +18,8 @@ from .thermal import (
 
 
 def run_thermal_monitor(arguments) -> int:
+    if arguments.audio_gap_seconds < 0:
+        raise ValueError("--audio-gap-seconds must not be negative")
     detector = ThermalPersonDetector(
         delta=arguments.delta,
         min_temperature=arguments.min_temperature,
@@ -68,7 +70,20 @@ def run_thermal_monitor(arguments) -> int:
             event, _primary = detector.step(temperatures, ambient, timestamp)
             if event is None:
                 continue
-            acknowledged = notifier.notify_person() if notifier is not None else False
+            temperature_status = (
+                "high"
+                if event.peak_temperature >= arguments.high_temperature
+                else "normal"
+            )
+            audio_results = []
+            if notifier is not None:
+                audio_results = notifier.notify_event_sequence(
+                    ["person_passed", f"temperature_{temperature_status}"],
+                    arguments.audio_gap_seconds,
+                )
+            acknowledged = bool(audio_results) and all(
+                acknowledged for _code, acknowledged in audio_results
+            )
             logger.log(event, acknowledged)
             print(
                 json.dumps(
@@ -76,7 +91,10 @@ def run_thermal_monitor(arguments) -> int:
                         "event": "PERSON_IN",
                         "count": event.detection_no,
                         "uno_ack": acknowledged,
+                        "audio_codes": [code for code, _ack in audio_results],
                         "peak_temperature": round(event.peak_temperature, 2),
+                        "temperature_status": temperature_status,
+                        "high_temperature_threshold": arguments.high_temperature,
                     },
                     ensure_ascii=False,
                 ),
@@ -106,3 +124,5 @@ def add_thermal_arguments(parser) -> None:
     parser.add_argument("--clear-seconds", type=float, default=1.5)
     parser.add_argument("--cooldown-seconds", type=float, default=3.0)
     parser.add_argument("--offset", type=float, default=4.0)
+    parser.add_argument("--high-temperature", type=float, default=37.3)
+    parser.add_argument("--audio-gap-seconds", type=float, default=2.0)

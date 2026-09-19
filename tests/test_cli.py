@@ -5,8 +5,9 @@ import sys
 import unittest
 from pathlib import Path
 
-from facebox.app import parser
+from facebox.app import identity_audio_event, parser
 from facebox.config import AppConfig
+from facebox.types import IdentityResult, IdentityStatus
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +56,21 @@ class CliTests(unittest.TestCase):
         self.assertIsNone(arguments.device)
         self.assertEqual(config.camera_source, "opencv")
         self.assertEqual(config.camera_device, "/dev/video0")
+
+    def test_identity_results_map_to_r3_audio_events(self):
+        self.assertEqual(
+            identity_audio_event(IdentityResult(IdentityStatus.MATCHED)),
+            "face_matched",
+        )
+        self.assertEqual(
+            identity_audio_event(IdentityResult(IdentityStatus.UNKNOWN)),
+            "face_failed",
+        )
+        self.assertEqual(
+            identity_audio_event(IdentityResult(IdentityStatus.RETRY)),
+            "face_failed",
+        )
+        self.assertIsNone(identity_audio_event(IdentityResult(IdentityStatus.WAITING)))
 
 
 if __name__ == "__main__":

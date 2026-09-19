@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -22,6 +24,13 @@ RISK_AUDIO_COMMANDS = {
     "高": b"0009\n",
     "中": b"0010\n",
     "低": b"0011\n",
+}
+EVENT_AUDIO_COMMANDS = {
+    "person_passed": b"0004\n",
+    "face_matched": b"0005\n",
+    "face_failed": b"0006\n",
+    "temperature_high": b"0007\n",
+    "temperature_normal": b"0008\n",
 }
 
 
@@ -270,16 +279,42 @@ class UnoNotifier:
 
             serial_factory = serial.Serial
         self.serial = serial_factory(port, baud, timeout=0.5)
-        sleep(reset_delay)
+        self.sleep = sleep
+        self.lock_path = (
+            Path(os.environ.get("FACEBOX_UNO_LOCK", "/tmp/facebox-uno.lock"))
+            if os.name == "posix"
+            else None
+        )
+        self.sleep(reset_delay)
+
+    @contextmanager
+    def _exclusive(self):
+        """Serialize writes from face, thermal and weekly worker processes."""
+        if self.lock_path is None:
+            yield
+            return
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("a", encoding="ascii") as handle:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _exchange(self, command: bytes) -> bool:
+        self.serial.write(command)
+        self.serial.flush()
+        reply = self.serial.readline().decode("ascii", errors="ignore").strip()
+        return reply == "ACK"
 
     def notify(self, command: bytes) -> bool:
         if not command.endswith(b"\n") or not command[:-1].decode("ascii").isdigit():
             if command != PERSON_COMMAND:
                 raise ValueError("Uno command must be ASCII digits followed by a newline")
-        self.serial.write(command)
-        self.serial.flush()
-        reply = self.serial.readline().decode("ascii", errors="ignore").strip()
-        return reply == "ACK"
+        with self._exclusive():
+            return self._exchange(command)
 
     def notify_person(self) -> bool:
         return self.notify(PERSON_COMMAND)
@@ -290,6 +325,32 @@ class UnoNotifier:
         except KeyError as error:
             raise ValueError(f"unsupported flu risk level: {risk_level}") from error
         return command.decode("ascii").strip(), self.notify(command)
+
+    def notify_event(self, event_name: str) -> tuple[str, bool]:
+        try:
+            command = EVENT_AUDIO_COMMANDS[event_name]
+        except KeyError as error:
+            raise ValueError(f"unsupported Uno event: {event_name}") from error
+        return command.decode("ascii").strip(), self.notify(command)
+
+    def notify_event_sequence(
+        self, event_names: list[str], gap_seconds: float = 0.0
+    ) -> list[tuple[str, bool]]:
+        if gap_seconds < 0:
+            raise ValueError("audio gap must not be negative")
+        try:
+            commands = [EVENT_AUDIO_COMMANDS[name] for name in event_names]
+        except KeyError as error:
+            raise ValueError(f"unsupported Uno event: {error.args[0]}") from error
+        results = []
+        with self._exclusive():
+            for index, command in enumerate(commands):
+                results.append(
+                    (command.decode("ascii").strip(), self._exchange(command))
+                )
+                if index + 1 < len(commands):
+                    self.sleep(gap_seconds)
+        return results
 
     def close(self) -> None:
         self.serial.close()

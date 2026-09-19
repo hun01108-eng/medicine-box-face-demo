@@ -329,14 +329,22 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 
 仓库现在同时包含 MLX90642-mini 红外阵列的人体经过检测。红外模块和
 USB 人脸摄像头相互独立：人脸识别命令保持不变，红外检测通过 USB
-串口读取 24×32 温度帧，并在确认有人经过时向 Arduino Uno 发送：
+串口读取 24×32 温度帧。发送给 Arduino Uno R3 的音频编号为：
 
 ```text
-PERSON_IN\n
+0004\n  有人经过/请吃药
+0005\n  人脸识别成功
+0006\n  人脸识别失败
+0007\n  体温过高
+0008\n  体温正常
 ```
 
-Uno 可返回 `ACK\n`。树莓派无论是否收到 ACK 都会把事件和确认结果写入
-`logs/person_events.csv`，但同一个人停留期间不会反复发送。
+红外检测确认有人经过后先发送 `0004`，默认间隔 2 秒，再根据测温结果发送
+`0007` 或 `0008`；体温过高门槛默认是 37.3°C，可用
+`--high-temperature` 和 `--audio-gap-seconds` 调整。Uno 可返回 `ACK\n`。
+树莓派无论是否收到 ACK 都会把事件和确认结果写入
+`logs/person_events.csv`，但同一个人停留期间不会反复发送。多个树莓派进程共用
+R3 时会通过文件锁串行发送，避免音频编号互相穿插。
 
 树莓派建议使用 `/dev/serial/by-id/` 下的稳定路径区分红外模块和 Uno：
 
@@ -344,6 +352,14 @@ Uno 可返回 `ACK\n`。树莓派无论是否收到 ACK 都会把事件和确认
 ls -l /dev/serial/by-id/
 PYTHONPATH=src python3 -m facebox.app thermal-monitor \
   --thermal-port /dev/serial/by-id/<thermal-device> \
+  --uno-port /dev/serial/by-id/<uno-device>
+```
+
+人脸识别接入 R3：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app monitor \
+  --source opencv --device /dev/video0 \
   --uno-port /dev/serial/by-id/<uno-device>
 ```
 
@@ -365,8 +381,8 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 三个功能使用同一个 CLI，但保持彼此独立，单项故障不会阻塞其他传感器：
 
 ```text
-USB摄像头 -> facebox run       -> 身份结果
-MLX90642 -> thermal-monitor    -> PERSON_IN / Uno
+USB摄像头 -> facebox run/monitor -> 0005 或 0006 / Uno
+MLX90642 -> thermal-monitor      -> 0004，再发送 0007 或 0008 / Uno
 云端网站 -> flu-status/monitor -> 高、中、低风险 + 本地缓存
 ```
 
