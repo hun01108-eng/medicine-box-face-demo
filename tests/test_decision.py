@@ -1,6 +1,6 @@
 import unittest
 
-from facebox.decision import DecisionConfig, MultiFrameDecision
+from facebox.decision import ContinuousDecision, DecisionConfig, MultiFrameDecision
 from facebox.types import FrameObservation, IdentityStatus
 
 
@@ -85,6 +85,41 @@ class MultiFrameDecisionTests(unittest.TestCase):
         self.engine.update(FrameObservation(10.1, 1, True, 0.8))
         self.engine.update(FrameObservation(10.2, 0, False, None))
         result = self.engine.update(FrameObservation(10.3, 1, True, 0.8))
+        self.assertEqual(result.status, IdentityStatus.WAITING)
+        self.assertEqual(result.matching_frames, 1)
+
+
+class ContinuousDecisionTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = ContinuousDecision(
+            DecisionConfig(similarity_threshold=0.55, required_matches=3, max_valid_frames=5)
+        )
+
+    def test_displays_identity_after_three_matching_frames(self):
+        self.engine.update(FrameObservation(1.0, 1, True, 0.60))
+        self.engine.update(FrameObservation(1.1, 1, True, 0.61))
+        result = self.engine.update(FrameObservation(1.2, 1, True, 0.62))
+        self.assertEqual(result.status, IdentityStatus.MATCHED)
+        self.assertEqual(result.user_id, "elder_001")
+
+    def test_current_mismatch_immediately_removes_stale_identity(self):
+        for index in range(3):
+            self.engine.update(FrameObservation(1.0 + index * 0.1, 1, True, 0.70))
+        result = self.engine.update(FrameObservation(1.4, 1, True, 0.20))
+        self.assertEqual(result.status, IdentityStatus.WAITING)
+        self.assertIsNone(result.user_id)
+
+    def test_sliding_window_marks_repeated_mismatches_unknown(self):
+        result = None
+        for index in range(5):
+            result = self.engine.update(FrameObservation(2.0 + index * 0.1, 1, True, 0.20))
+        self.assertEqual(result.status, IdentityStatus.UNKNOWN)
+
+    def test_no_face_clears_recent_matches(self):
+        self.engine.update(FrameObservation(3.0, 1, True, 0.70))
+        self.engine.update(FrameObservation(3.1, 1, True, 0.70))
+        self.engine.update(FrameObservation(3.2, 0, False, None, "no_face"))
+        result = self.engine.update(FrameObservation(3.3, 1, True, 0.70))
         self.assertEqual(result.status, IdentityStatus.WAITING)
         self.assertEqual(result.matching_frames, 1)
 
