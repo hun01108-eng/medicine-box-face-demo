@@ -29,8 +29,9 @@ class CliTests(unittest.TestCase):
         completed = self.run_cli("simulate", "--case", "known")
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
+        configured_user = json.loads((ROOT / "config.json").read_text(encoding="utf-8"))["decision"]["user_id"]
         self.assertEqual(payload["status"], "MATCHED")
-        self.assertEqual(payload["user_id"], "elder_001")
+        self.assertEqual(payload["user_id"], configured_user)
         self.assertLessEqual(payload["latency_seconds"], 3.0)
 
     def test_unknown_simulation_fails_closed(self):
