@@ -1,0 +1,4 @@
+# Raspberry Pi OS建议优先使用系统提供的NumPy和OpenCV，避免覆盖系统相机栈。
+# 普通Linux虚拟环境可直接安装本文件。
+numpy>=1.24
+opencv-contrib-python>=4.8,<5
