@@ -18,6 +18,7 @@ FRAME_LEN = 1544
 HEADER = bytes((0x5A, 0x06, 0x02))
 THERMAL_BAUD = 921600
 UNO_BAUD = 9600
+UNO_ACK_TIMEOUT_SECONDS = 2.0
 EDGE_MARGIN = 3
 PERSON_COMMAND = b"PERSON_IN\n"
 RISK_AUDIO_COMMANDS = {
@@ -270,15 +271,19 @@ class UnoNotifier:
         self,
         port: str,
         baud: int = UNO_BAUD,
+        ack_timeout: float = UNO_ACK_TIMEOUT_SECONDS,
         reset_delay: float = 2.0,
         serial_factory=None,
         sleep: Callable[[float], None] = time.sleep,
     ):
+        if ack_timeout <= 0:
+            raise ValueError("ack_timeout must be positive")
         if serial_factory is None:
             import serial
 
             serial_factory = serial.Serial
-        self.serial = serial_factory(port, baud, timeout=0.5)
+        self.ack_timeout = ack_timeout
+        self.serial = serial_factory(port, baud, timeout=ack_timeout)
         self.sleep = sleep
         self.lock_path = (
             Path(os.environ.get("FACEBOX_UNO_LOCK", "/tmp/facebox-uno.lock"))
@@ -306,8 +311,21 @@ class UnoNotifier:
     def _exchange(self, command: bytes) -> bool:
         self.serial.write(command)
         self.serial.flush()
-        reply = self.serial.readline().decode("ascii", errors="ignore").strip()
-        return reply == "ACK"
+        deadline = time.monotonic() + self.ack_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            try:
+                self.serial.timeout = remaining
+            except (AttributeError, TypeError):
+                pass
+            reply = self.serial.readline().decode("ascii", errors="ignore").strip()
+            if reply == "ACK":
+                return True
+            if reply == "ERR" or not reply:
+                return False
+            # 调试固件可能在 ACK 前输出诊断行；忽略后继续等待正式回复。
 
     def notify(self, command: bytes) -> bool:
         if not command.endswith(b"\n") or not command[:-1].decode("ascii").isdigit():
