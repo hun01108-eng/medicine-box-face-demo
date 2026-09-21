@@ -1,4 +1,4 @@
-"""Command-line runner for thermal passage detection and Uno notification."""
+"""红外经过检测的命令行入口，负责组织采集、判断、播报和记录流程。"""
 
 from __future__ import annotations
 
@@ -8,16 +8,17 @@ from pathlib import Path
 
 from .thermal import (
     THERMAL_BAUD,
-    UNO_BAUD,
     ThermalEventLogger,
     ThermalPersonDetector,
     ThermalSerialReader,
-    UnoNotifier,
     simulated_frame,
 )
+from .uno import UNO_BAUD, UnoNotifier
 
 
 def run_thermal_monitor(arguments) -> int:
+    """运行红外监测主循环，直到用户中断程序。"""
+
     if arguments.audio_gap_seconds < 0:
         raise ValueError("--audio-gap-seconds must not be negative")
     detector = ThermalPersonDetector(
@@ -33,6 +34,7 @@ def run_thermal_monitor(arguments) -> int:
     logger = ThermalEventLogger(Path(arguments.log))
     reader = None
     notifier = None
+    # 模拟模式不打开红外串口，可在普通电脑上验证完整检测流程。
     if not arguments.simulate:
         if not arguments.thermal_port:
             raise ValueError("--thermal-port is required unless --simulate is used")
@@ -54,6 +56,7 @@ def run_thermal_monitor(arguments) -> int:
     )
     try:
         while True:
+            # 实机与模拟数据最终统一为温度矩阵、环境温度和单调时钟时间戳。
             if reader is None:
                 now = time.monotonic()
                 temperatures, ambient = simulated_frame(now - started)
@@ -67,9 +70,11 @@ def run_thermal_monitor(arguments) -> int:
                 temperatures, ambient, timestamp = reader.latest
                 reader.latest = None
 
-            event, _primary = detector.step(temperatures, ambient, timestamp)
+            event, _ = detector.step(temperatures, ambient, timestamp)
             if event is None:
                 continue
+
+            # 校准后的峰值温度仅用于分级播报，不参与人员存在判定。
             temperature_status = (
                 "high"
                 if event.peak_temperature >= arguments.high_temperature
@@ -77,6 +82,7 @@ def run_thermal_monitor(arguments) -> int:
             )
             audio_results = []
             if notifier is not None:
+                # 先提示有人经过，再播报本次体温分类，两条指令之间保留音频间隔。
                 audio_results = notifier.notify_event_sequence(
                     ["person_passed", f"temperature_{temperature_status}"],
                     arguments.audio_gap_seconds,
@@ -110,6 +116,8 @@ def run_thermal_monitor(arguments) -> int:
 
 
 def add_thermal_arguments(parser) -> None:
+    """注册红外监测的硬件端口、检测阈值和播报参数。"""
+
     parser.add_argument("--thermal-port")
     parser.add_argument("--thermal-baud", type=int, default=THERMAL_BAUD)
     parser.add_argument("--uno-port")

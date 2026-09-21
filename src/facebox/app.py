@@ -10,7 +10,7 @@ from .config import AppConfig, load_config
 from .decision import ContinuousDecision, MultiFrameDecision
 from .metrics import summarize_latencies
 from .templates import TemplateStore
-from .thermal import UNO_BAUD, UnoNotifier
+from .uno import UNO_BAUD, UnoNotifier
 from .types import FrameObservation, IdentityResult, IdentityStatus
 
 

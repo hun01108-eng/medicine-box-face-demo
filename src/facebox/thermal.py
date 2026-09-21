@@ -1,42 +1,32 @@
-"""MLX90642 thermal-array person detection and Arduino Uno notification."""
+"""MLX90642 红外阵列的数据解析、人体检测、事件记录与模拟数据。
+
+本模块只负责红外感知，不直接控制 Uno。检测结果由 ``thermal_app`` 交给
+共用串口模块发送，从而使传感器算法可以脱离硬件独立测试。
+"""
 
 from __future__ import annotations
 
 import csv
-import os
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import numpy as np
 
 
+# MLX90642-mini 输出 24×32 个测温点，每帧共 1544 字节。
 ROWS, COLS = 24, 32
 FRAME_LEN = 1544
 HEADER = bytes((0x5A, 0x06, 0x02))
 THERMAL_BAUD = 921600
-UNO_BAUD = 9600
-UNO_ACK_TIMEOUT_SECONDS = 2.0
+
+# 阵列边缘测温波动较大，不参与人体热斑判定。
 EDGE_MARGIN = 3
-PERSON_COMMAND = b"PERSON_IN\n"
-RISK_AUDIO_COMMANDS = {
-    "高": b"0009\n",
-    "中": b"0010\n",
-    "低": b"0011\n",
-}
-EVENT_AUDIO_COMMANDS = {
-    "person_passed": b"0004\n",
-    "face_matched": b"0005\n",
-    "face_failed": b"0006\n",
-    "temperature_high": b"0007\n",
-    "temperature_normal": b"0008\n",
-}
 
 
 def parse_frame(buffer: bytes):
-    """Return ``(temperatures, ambient, consumed)`` for one complete frame."""
+    """从串口缓存中解析一帧，返回温度矩阵、环境温度和已消费字节数。"""
     start = buffer.find(HEADER)
     if start < 0 or len(buffer) - start < FRAME_LEN:
         return None
@@ -49,7 +39,7 @@ def parse_frame(buffer: bytes):
 
 
 def clean_frame(frame: np.ndarray, salt: float = 4.0) -> np.ndarray:
-    """Suppress isolated hot pixels and the sensor's unreliable outer edge."""
+    """用邻域中值抑制孤立高温噪点，并屏蔽不稳定的阵列边缘。"""
     source = np.asarray(frame, dtype=np.float32)
     if source.shape != (ROWS, COLS):
         raise ValueError(f"thermal frame must be {ROWS}x{COLS}")
@@ -75,6 +65,8 @@ def clean_frame(frame: np.ndarray, salt: float = 4.0) -> np.ndarray:
 
 @dataclass(frozen=True)
 class PersonEvent:
+    """一次经过事件的结构化结果，用于播报、终端输出和CSV存档。"""
+
     detection_no: int
     timestamp: float
     peak_temperature: float
@@ -85,7 +77,12 @@ class PersonEvent:
 
 
 class ThermalPersonDetector:
-    """Adaptive-background thermal-blob detector with one event per passage."""
+    """基于自适应背景差分的热斑检测器，每次经过只产生一个事件。
+
+    状态依次为 WARMUP（建立背景）、IDLE（等待人员）和 ACTIVE（人员仍在）。
+    持续出现达到确认时间才触发，持续消失达到清除时间后才允许下一次检测，
+    可避免瞬时噪声和人员停留造成重复播报。
+    """
 
     def __init__(
         self,
@@ -119,10 +116,10 @@ class ThermalPersonDetector:
         self._absent_since: Optional[float] = None
         self._next_event_at = float("-inf")
         self.detections = 0
-        self.primary = None
 
     @staticmethod
     def _blobs(mask: np.ndarray) -> list[dict]:
+        """用八邻域连通搜索将高温像素合并为候选人体热斑。"""
         visited = np.zeros_like(mask, dtype=bool)
         blobs = []
         for row in range(ROWS):
@@ -156,10 +153,6 @@ class ThermalPersonDetector:
                     {
                         "mask": blob_mask,
                         "area": len(cells),
-                        "r0": min(rows),
-                        "r1": max(rows),
-                        "c0": min(columns),
-                        "c1": max(columns),
                     }
                 )
         return blobs
@@ -169,6 +162,7 @@ class ThermalPersonDetector:
     ) -> tuple[Optional[PersonEvent], Optional[dict]]:
         frame = clean_frame(frame)
         if self.state == "WARMUP":
+            # 多帧中值比单帧更能代表无人状态下的稳定背景。
             self._warmup.append(frame.copy())
             if len(self._warmup) >= self.warmup_frames:
                 self.background = np.median(np.stack(self._warmup), axis=0)
@@ -177,6 +171,7 @@ class ThermalPersonDetector:
             return None, None
 
         assert self.background is not None
+        # 像素必须同时高于动态背景和绝对温度下限，才视为前景。
         threshold = np.maximum(self.background + self.delta, self.min_temperature)
         candidates = [
             blob
@@ -193,7 +188,6 @@ class ThermalPersonDetector:
             blob["peak_c"] = int(columns[peak_index])
         if candidates:
             primary = max(candidates, key=lambda blob: blob["peak"])
-        self.primary = primary
 
         if primary is None:
             if self._absent_since is None:
@@ -226,6 +220,7 @@ class ThermalPersonDetector:
 
         alpha = np.full(frame.shape, self.background_alpha)
         if primary is not None:
+            # 人体区域慢速更新，防止静止人员迅速融入背景。
             alpha = np.where(
                 primary["mask"], self.foreground_alpha, self.background_alpha
             )
@@ -234,6 +229,8 @@ class ThermalPersonDetector:
 
 
 class ThermalSerialReader:
+    """持续接收传感器字节流，并保留最近一帧完整温度数据。"""
+
     def __init__(self, port: str, baud: int = THERMAL_BAUD, serial_factory=None):
         if serial_factory is None:
             import serial
@@ -244,10 +241,12 @@ class ThermalSerialReader:
         self.latest = None
 
     def read_once(self) -> bool:
+        """读取并解析当前缓存；成功获得新帧时返回 True。"""
         chunk = self.serial.read(65536)
         if chunk:
             self.buffer.extend(chunk)
         if len(self.buffer) > FRAME_LEN * 4:
+            # 丢弃过旧的不完整数据，限制长期运行时的缓存大小。
             self.buffer = self.buffer[-FRAME_LEN * 3 :]
         updated = False
         while True:
@@ -264,117 +263,9 @@ class ThermalSerialReader:
         self.serial.close()
 
 
-class UnoNotifier:
-    """Send newline-delimited commands to an Arduino Uno R3."""
-
-    def __init__(
-        self,
-        port: str,
-        baud: int = UNO_BAUD,
-        ack_timeout: float = UNO_ACK_TIMEOUT_SECONDS,
-        reset_delay: float = 2.0,
-        serial_factory=None,
-        sleep: Callable[[float], None] = time.sleep,
-    ):
-        if ack_timeout <= 0:
-            raise ValueError("ack_timeout must be positive")
-        if serial_factory is None:
-            import serial
-
-            serial_factory = serial.Serial
-        self.ack_timeout = ack_timeout
-        self.serial = serial_factory(port, baud, timeout=ack_timeout)
-        self.sleep = sleep
-        self.lock_path = (
-            Path(os.environ.get("FACEBOX_UNO_LOCK", "/tmp/facebox-uno.lock"))
-            if os.name == "posix"
-            else None
-        )
-        self.sleep(reset_delay)
-
-    @contextmanager
-    def _exclusive(self):
-        """Serialize writes from face, thermal and weekly worker processes."""
-        if self.lock_path is None:
-            yield
-            return
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.lock_path.open("a", encoding="ascii") as handle:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
-    def _exchange(self, command: bytes) -> bool:
-        self.serial.write(command)
-        self.serial.flush()
-        deadline = time.monotonic() + self.ack_timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return False
-            try:
-                self.serial.timeout = remaining
-            except (AttributeError, TypeError):
-                pass
-            reply = self.serial.readline().decode("ascii", errors="ignore").strip()
-            if reply == "ACK":
-                return True
-            if reply == "ERR" or not reply:
-                return False
-            # 调试固件可能在 ACK 前输出诊断行；忽略后继续等待正式回复。
-
-    def notify(self, command: bytes) -> bool:
-        if not command.endswith(b"\n") or not command[:-1].decode("ascii").isdigit():
-            if command != PERSON_COMMAND:
-                raise ValueError("Uno command must be ASCII digits followed by a newline")
-        with self._exclusive():
-            return self._exchange(command)
-
-    def notify_person(self) -> bool:
-        return self.notify(PERSON_COMMAND)
-
-    def notify_risk(self, risk_level: str) -> tuple[str, bool]:
-        try:
-            command = RISK_AUDIO_COMMANDS[risk_level]
-        except KeyError as error:
-            raise ValueError(f"unsupported flu risk level: {risk_level}") from error
-        return command.decode("ascii").strip(), self.notify(command)
-
-    def notify_event(self, event_name: str) -> tuple[str, bool]:
-        try:
-            command = EVENT_AUDIO_COMMANDS[event_name]
-        except KeyError as error:
-            raise ValueError(f"unsupported Uno event: {event_name}") from error
-        return command.decode("ascii").strip(), self.notify(command)
-
-    def notify_event_sequence(
-        self, event_names: list[str], gap_seconds: float = 0.0
-    ) -> list[tuple[str, bool]]:
-        if gap_seconds < 0:
-            raise ValueError("audio gap must not be negative")
-        try:
-            commands = [EVENT_AUDIO_COMMANDS[name] for name in event_names]
-        except KeyError as error:
-            raise ValueError(f"unsupported Uno event: {error.args[0]}") from error
-        results = []
-        with self._exclusive():
-            for index, command in enumerate(commands):
-                results.append(
-                    (command.decode("ascii").strip(), self._exchange(command))
-                )
-                if index + 1 < len(commands):
-                    self.sleep(gap_seconds)
-        return results
-
-    def close(self) -> None:
-        self.serial.close()
-
-
 class ThermalEventLogger:
+    """将经过检测结果追加到CSV，便于展示和后续复核。"""
+
     FIELDS = (
         "time",
         "event",
@@ -412,7 +303,7 @@ class ThermalEventLogger:
 
 
 def simulated_frame(timestamp: float) -> tuple[np.ndarray, float]:
-    """Produce a repeatable warm person for hardware-free integration tests."""
+    """生成周期性人体热斑，用于无传感器条件下的联调测试。"""
     ambient = 26.0
     frame = np.full((ROWS, COLS), ambient, dtype=np.float32)
     phase = timestamp % 8.0

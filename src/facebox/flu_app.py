@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .config import AppConfig
 from .flu_api import FluApiClient, FluRiskStatus
-from .thermal import UNO_BAUD, UnoNotifier
+from .uno import UNO_BAUD, UnoNotifier
 
 
 def add_flu_arguments(command: argparse.ArgumentParser, monitor: bool = False) -> None:
