@@ -1,0 +1,41 @@
+{
+  "green": {
+    "h_min": 50,
+    "h_max": 90,
+    "s_min": 50,
+    "v_min": 150,
+    "min_area": 300,
+    "max_area": 40000,
+    "min_count": 3
+  },
+  "red": {
+    "h_low_min": 0,
+    "h_low_max": 10,
+    "h_high_min": 170,
+    "h_high_max": 179,
+    "s_min": 100,
+    "v_min": 60,
+    "v_max": 255,
+    "min_area": 200,
+    "max_area": 100000,
+    "min_count": 3
+  },
+  "camera": {
+    "width": 1280,
+    "height": 720,
+    "target_width": 1000,
+    "warmup_seconds": 1.0
+  },
+  "serial": {
+    "enabled": false,
+    "protocol_confirmed": false,
+    "port": "/dev/serial0",
+    "baud": 9600,
+    "timeout_seconds": 2.0,
+    "alert_command": "0012"
+  },
+  "shortage_confirm_frames": 5,
+  "alert_interval_seconds": 10.0,
+  "debug": false,
+  "show_masks": false
+}

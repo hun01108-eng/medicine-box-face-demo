@@ -1,0 +1,3 @@
+# Raspberry Pi OS优先通过apt提供NumPy、OpenCV和Picamera2，避免pip覆盖系统相机栈。
+# 仅在启用串口提醒时需要：
+pyserial>=3.5
