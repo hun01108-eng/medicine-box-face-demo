@@ -34,8 +34,6 @@
     "timeout_seconds": 2.0,
     "alert_command": "0012"
   },
-  "shortage_confirm_frames": 5,
-  "alert_interval_seconds": 10.0,
-  "debug": false,
-  "show_masks": false
+  "confirm_frames": 5,
+  "alert_interval_seconds": 10.0
 }
