@@ -96,7 +96,7 @@
 #define MP3_TRACK_EVENING  3     /* 吃药提醒：晚上八点 -> 003.mp3 */
 
 #define MP3_BAUD           9600  /* GD5800 默认波特率 */
-#define MP3_VOLUME         30    /* 音量 0~30（原 MedicineReminder 用 20，这里取 30 更响） */
+#define MP3_VOLUME         30    /* 音量范围 0~30 */
 #define MP3_POWER_ON_MS    1500UL/* 上电后等模块初始化，期间不发指令 */
 
 /* 上电自检：1 = 上电后自动播一次 001.mp3；0 = 关闭
@@ -177,8 +177,7 @@ const uint8_t PIN_OLED_SDA = 6;
 
 /* MP3 软件串口
  *   PIN_MP3_RX = Arduino 接收脚，接 MP3 模块的 T  -> D9
- *   PIN_MP3_TX = Arduino 发送脚，接 MP3 模块的 R  -> D11
- * 没声音就把这两个值对调（改成 11 和 9）再试一次。 */
+ *   PIN_MP3_TX = Arduino 发送脚，接 MP3 模块的 R  -> D11 */
 const uint8_t PIN_MP3_RX = 9;
 const uint8_t PIN_MP3_TX = 11;
 
@@ -305,7 +304,6 @@ uint8_t queueTail  = 0;            /* 入队位置 */
 uint8_t queueCount = 0;            /* 当前排队条数 */
 
 bool          isPlaying   = false; /* 是否有一曲正在播 */
-uint8_t       curTrack    = 0;     /* 当前播放的曲目号 */
 unsigned long playStartMs = 0;     /* 当前曲目开始播放的时刻 */
 unsigned long curTrackMs  = 0;     /* 当前曲目预估时长（查表得到） */
 #endif
@@ -320,8 +318,10 @@ PiState       piState      = PI_WAIT_DIGIT;
 char          piDigits[4];           /* 已收到的数字字符 */
 uint8_t       piDigitCount = 0;      /* 已收到几位 */
 unsigned long piStateMs    = 0;      /* 进入当前状态的时刻，用于超时 */
+#if DEBUG_SERIAL
 char          piLineBuf[8];          /* 原始行缓存，仅用于调试回显 */
 uint8_t       piLineLen    = 0;
+#endif
 
 /* ---- 每首音频的实际时长（毫秒）----
  * 决定"什么时候算这首播完了，可以放下一首"。
@@ -660,17 +660,8 @@ void updateButtons() {
     DBG_PRINTLN(F("[KEY] A0 -> -1 min"));
   }
 
-  /* ---- 手动测试入口：设置模式下【同时按住 A1 + A0】----
-   * 触发一次"模拟 08:00 提醒"：D3 亮 5 秒 + 播放 001.mp3。
-   *
-   * 为什么用 A1 + A0 而不是 A1 + A2：
-   *   A2 是"退出设置模式"键，按下会立刻把 setMode 置为 false。
-   *   若把它编进组合，就必须改动 A2 原有的处理去抑制退出动作，
-   *   会破坏"退出设置"这个既有功能。改用两个调时键则完全不必动原逻辑。
-   *
-   * 独立新增的入口：只读 keyPlus / keyMinus 的 lastStable，
-   * 不参与上面任何按键的事件判定；用上升沿触发，按住不放只触发一次。
-   * 同时按住时 A1 的 +1 和 A0 的 -1 各触发一次，时间净变化为 0。 */
+  /* ---- 手动测试：设置模式下同时按住 A1 + A0 ----
+   * 上升沿只触发一次，模拟早间提醒：D3 亮 5 秒并播放 001.mp3。 */
   static bool testComboPrev = false;
   bool testComboNow = setMode && keyPlus.lastStable && keyMinus.lastStable;
   if (testComboNow && !testComboPrev) {
@@ -990,7 +981,6 @@ void mp3Service() {
   mp3PlayTrack(track);
 
   /* 计时从播放调用【返回后】开始算，避免把阻塞时间算进曲目时长 */
-  curTrack    = track;
   curTrackMs  = trackMsOf(track);
   playStartMs = millis();
   isPlaying   = true;
@@ -1010,7 +1000,9 @@ void mp3Service() {
 void piResetState() {
   piState      = PI_WAIT_DIGIT;
   piDigitCount = 0;
+#if DEBUG_SERIAL
   piLineLen    = 0;
+#endif
 }
 
 /* 每收到一个字节就喂进来。
@@ -1022,8 +1014,10 @@ void piResetState() {
  *   - 其它字符 : 立即判定本行格式错误，丢弃重来
  */
 void piFeedByte(char c) {
-  /* 记录原始行用于调试回显 */
+  /* 仅在调试版本中记录原始行。 */
+#if DEBUG_SERIAL
   if (piLineLen < sizeof(piLineBuf)) piLineBuf[piLineLen++] = c;
+#endif
 
   /* --- 回车：忽略 --- */
   if (c == '\r') {
@@ -1073,7 +1067,8 @@ void piFeedByte(char c) {
 
 /* 处理一条格式正确的 4 位指令（值已转成整数） */
 void piHandleCommand(int track) {
-  /* 打印收到的原始行 + 十六进制，便于和树莓派对账 */
+  /* 调试版本打印原始行及十六进制，便于与树莓派日志对账。 */
+#if DEBUG_SERIAL
   DBG_PRINT(F("RX: \""));
   for (uint8_t i = 0; i < piLineLen; i++) {
     char c = piLineBuf[i];
@@ -1086,6 +1081,7 @@ void piHandleCommand(int track) {
     if (i + 1 < piLineLen) DBG_PRINT(' ');
   }
   DBG_PRINTLN(']');
+#endif
 
   /* --- 判断指令是否在有效范围内（文档规定 0001~0011） --- */
   if (track < CMD_MIN || track > CMD_MAX) {
