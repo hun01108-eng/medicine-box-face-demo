@@ -1,3 +1,4 @@
+from collections import deque
 from dataclasses import dataclass
 from statistics import median
 from typing import Optional
@@ -75,3 +76,50 @@ class MultiFrameDecision:
         else:
             self._terminal = None
         return self._terminal or self._result(IdentityStatus.WAITING, now, reason="collecting_frames")
+
+
+class ContinuousDecision:
+    """Sliding multi-frame decision for a privacy-safe live preview."""
+
+    def __init__(self, config: DecisionConfig):
+        self.config = config
+        self._scores: deque[float] = deque(maxlen=config.max_valid_frames)
+        self._timestamps: deque[float] = deque(maxlen=config.max_valid_frames)
+
+    def reset(self) -> None:
+        self._scores.clear()
+        self._timestamps.clear()
+
+    def _result(self, status: IdentityStatus, now: float, reason: str = "") -> IdentityResult:
+        scores = list(self._scores)
+        matches = sum(score >= self.config.similarity_threshold for score in scores)
+        confidence = median(scores) if scores else None
+        latency = 0.0 if not self._timestamps else max(0.0, now - self._timestamps[0])
+        user_id = self.config.user_id if status == IdentityStatus.MATCHED else None
+        return IdentityResult(status, user_id, confidence, reason, len(scores), matches, latency)
+
+    def update(self, observation: FrameObservation) -> IdentityResult:
+        now = observation.processed_at if observation.processed_at is not None else observation.timestamp
+        if observation.face_count == 0:
+            self.reset()
+            return self._result(IdentityStatus.WAITING, now, "no_face")
+        if observation.face_count > 1:
+            self.reset()
+            return self._result(IdentityStatus.RETRY, now, "multiple_faces")
+        if not observation.quality_ok or observation.similarity is None:
+            self.reset()
+            return self._result(
+                IdentityStatus.RETRY,
+                now,
+                observation.quality_reason or "poor_quality",
+            )
+
+        score = max(-1.0, min(1.0, float(observation.similarity)))
+        self._scores.append(score)
+        self._timestamps.append(observation.timestamp)
+        matches = sum(value >= self.config.similarity_threshold for value in self._scores)
+        if score >= self.config.similarity_threshold and matches >= self.config.required_matches:
+            return self._result(IdentityStatus.MATCHED, now)
+        if len(self._scores) >= self.config.max_valid_frames and matches < self.config.required_matches:
+            return self._result(IdentityStatus.UNKNOWN, now, "below_threshold")
+        return self._result(IdentityStatus.WAITING, now, "collecting_frames")

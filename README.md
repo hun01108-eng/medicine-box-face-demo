@@ -161,7 +161,7 @@ flowchart TD
 - 避免摄像头正对窗户；
 - 让老人脸部在画面中占有足够像素；
 - 可增加柔和白光补光和扩散罩；
-- 如果使用固定焦点OV5647，必须实测安装距离下的人脸清晰度。
+- 默认使用 USB 摄像头 `/dev/video0`；必须实测安装距离下的人脸清晰度。
 
 ### 2. 注册数据
 
@@ -230,6 +230,8 @@ flowchart TD
 
 ```text
 medicine-box-face-demo/
+├── cloud/flu_web/              云端网页、数据库接口与受保护接收端
+├── workers/flu_updater/        树莓派官网周报下载、解析和上传任务
 ├── README.md                    项目思路、方案与程序逻辑
 ├── README_树莓派操作说明.md       安装、注册、运行和测试命令
 ├── config.json                 模型、摄像头、质量与决策参数
@@ -296,7 +298,7 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 
 - 单人开放集决策框架；
 - YuNet＋SFace接口；
-- Picamera2和USB摄像头适配层；
+- 默认 USB 摄像头输入，同时保留 Picamera2 兼容适配层；
 - 多光照注册模板支持；
 - 图像质量门禁；
 - 多帧确认和3秒超时；
@@ -308,7 +310,7 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 
 待树莓派实机完成：
 
-1. 确认摄像头型号和Picamera2取帧；
+1. 确认 USB 摄像头设备名并验证 `/dev/video0` 取帧；
 2. 采集老人多光照注册样本；
 3. 使用老人和多位陌生人数据标定阈值；
 4. 测试明亮、普通、较暗、侧光和逆光；
@@ -326,15 +328,23 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 ## 十四、红外经过检测与 Uno 通知
 
 仓库现在同时包含 MLX90642-mini 红外阵列的人体经过检测。红外模块和
-OV5647 人脸摄像头相互独立：人脸识别命令保持不变，红外检测通过 USB
-串口读取 24×32 温度帧，并在确认有人经过时向 Arduino Uno 发送：
+USB 人脸摄像头相互独立：人脸识别命令保持不变，红外检测通过 USB
+串口读取 24×32 温度帧。发送给 Arduino Uno R3 的音频编号为：
 
 ```text
-PERSON_IN\n
+0004\n  有人经过/请吃药
+0005\n  人脸识别成功
+0006\n  人脸识别失败
+0007\n  体温过高
+0008\n  体温正常
 ```
 
-Uno 可返回 `ACK\n`。树莓派无论是否收到 ACK 都会把事件和确认结果写入
-`logs/person_events.csv`，但同一个人停留期间不会反复发送。
+红外检测确认有人经过后先发送 `0004`，默认间隔 2 秒，再根据测温结果发送
+`0007` 或 `0008`；体温过高门槛默认是 37.3°C，可用
+`--high-temperature` 和 `--audio-gap-seconds` 调整。Uno 可返回 `ACK\n`。
+树莓派无论是否收到 ACK 都会把事件和确认结果写入
+`logs/person_events.csv`，但同一个人停留期间不会反复发送。多个树莓派进程共用
+R3 时会通过文件锁串行发送，避免音频编号互相穿插。
 
 树莓派建议使用 `/dev/serial/by-id/` 下的稳定路径区分红外模块和 Uno：
 
@@ -342,6 +352,14 @@ Uno 可返回 `ACK\n`。树莓派无论是否收到 ACK 都会把事件和确认
 ls -l /dev/serial/by-id/
 PYTHONPATH=src python3 -m facebox.app thermal-monitor \
   --thermal-port /dev/serial/by-id/<thermal-device> \
+  --uno-port /dev/serial/by-id/<uno-device>
+```
+
+人脸识别接入 R3：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app monitor \
+  --source opencv --device /dev/video0 \
   --uno-port /dev/serial/by-id/<uno-device>
 ```
 
@@ -363,8 +381,8 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 三个功能使用同一个 CLI，但保持彼此独立，单项故障不会阻塞其他传感器：
 
 ```text
-OV5647 -> facebox run          -> 身份结果
-MLX90642 -> thermal-monitor    -> PERSON_IN / Uno
+USB摄像头 -> facebox run/monitor -> 0005 或 0006 / Uno
+MLX90642 -> thermal-monitor      -> 0004，再发送 0007 或 0008 / Uno
 云端网站 -> flu-status/monitor -> 高、中、低风险 + 本地缓存
 ```
 
@@ -386,3 +404,11 @@ PYTHONPATH=src python3 -m facebox.app flu-monitor
 
 当前服务器使用 HTTP，适合先完成局域/演示联调；正式公网使用时应配置域名和 HTTPS。
 风险等级目前只输出和缓存，不会自动修改药物、剂量，也不会擅自触发 Uno 动作。
+
+每周预警音频编号使用换行分隔的 ASCII 串口协议：高风险 `0009\n`、中风险
+`0010\n`、低风险 `0011\n`。`flu-audio` 会记录最近已发送周次，同一周默认
+只发送一次，R3 可返回 `ACK\n`，但未返回 ACK 不会自动重复播放。
+
+电脑端原有的周报更新流程已整理到 `workers/flu_updater/`，可在树莓派上下载、
+解析并通过带令牌的接口上传云服务器；网页、主数据库和 DeepSeek 密钥仍留在云端。
+该更新器与人脸识别、红外检测互不占用摄像头或串口。

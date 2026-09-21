@@ -6,7 +6,7 @@
 
 - OpenCV YuNet人脸检测；
 - OpenCV SFace人脸对齐、特征提取和余弦比对；
-- 普通OpenCV/USB摄像头和Picamera2两种输入；
+- 默认使用普通 OpenCV/USB 摄像头，并保留 Picamera2 兼容输入；
 - 过暗、过曝、模糊、人脸太小的质量门禁；
 - 多人画面拒绝；
 - 3个匹配帧确认、最多5个有效帧；
@@ -62,7 +62,7 @@ python3 scripts/download_models.py
 
 ## 4. 树莓派依赖
 
-### Raspberry Pi OS＋CSI摄像头
+### Raspberry Pi OS＋USB摄像头（当前默认）
 
 先检查系统是否已经具有依赖：
 
@@ -70,12 +70,10 @@ python3 scripts/download_models.py
 python3 - <<'PY'
 import cv2
 import numpy
-from picamera2 import Picamera2
 print("OpenCV:", cv2.__version__)
 print("NumPy:", numpy.__version__)
 print("FaceDetectorYN:", hasattr(cv2, "FaceDetectorYN"))
 print("FaceRecognizerSF:", hasattr(cv2, "FaceRecognizerSF"))
-print("Picamera2: OK")
 PY
 ```
 
@@ -83,12 +81,12 @@ PY
 
 ```bash
 sudo apt update
-sudo apt install -y python3-opencv python3-picamera2
+sudo apt install -y python3-opencv v4l-utils
 ```
 
-不要优先用`pip`覆盖Raspberry Pi OS自带的Picamera2/libcamera环境。
+用 `v4l2-ctl --list-devices` 确认 USB 摄像头对应的视频设备。
 
-### USB摄像头或普通Linux
+### 其他普通Linux环境
 
 建议使用独立虚拟环境：
 
@@ -139,16 +137,16 @@ PYTHONPATH=src python3 -m facebox.app simulate --case timeout
 
 注册必须由老人或监护人主动启动。注册图片不得放入代码仓库或云端。
 
-Picamera2系统可使用`rpicam-still`逐张拍摄，例如：
+USB 摄像头可使用系统相机程序逐张拍摄，或从预览画面保存注册照片；例如文件名为：
 
 ```bash
-rpicam-still --width 640 --height 480 --output enrollment_images/normal_front.jpg
-rpicam-still --width 640 --height 480 --output enrollment_images/bright_front.jpg
-rpicam-still --width 640 --height 480 --output enrollment_images/dim_front.jpg
-rpicam-still --width 640 --height 480 --output enrollment_images/left_light.jpg
-rpicam-still --width 640 --height 480 --output enrollment_images/right_light.jpg
-rpicam-still --width 640 --height 480 --output enrollment_images/turn_left.jpg
-rpicam-still --width 640 --height 480 --output enrollment_images/turn_right.jpg
+enrollment_images/normal_front.jpg
+enrollment_images/bright_front.jpg
+enrollment_images/dim_front.jpg
+enrollment_images/left_light.jpg
+enrollment_images/right_light.jpg
+enrollment_images/turn_left.jpg
+enrollment_images/turn_right.jpg
 ```
 
 采集要求：
@@ -191,28 +189,20 @@ PYTHONPATH=src python3 -m facebox.app self-check
 "ready": true
 ```
 
-### CSI/Picamera2摄像头
-
-```bash
-PYTHONPATH=src python3 -m facebox.app run --source picamera2 --display
-```
-
-### USB摄像头
-
-先查看设备：
+### USB摄像头（默认）
 
 ```bash
 v4l2-ctl --list-devices
+PYTHONPATH=src python3 -m facebox.app run --display
 ```
 
-再运行：
+默认配置为 `opencv` 和 `/dev/video0`。如果设备实际是 `/dev/video2`：
 
 ```bash
-PYTHONPATH=src python3 -m facebox.app run \
-  --source opencv \
-  --device /dev/video0 \
-  --display
+PYTHONPATH=src python3 -m facebox.app run --device /dev/video2 --display
 ```
+
+如需临时兼容 CSI 摄像头，仍可显式使用 `--source picamera2`。
 
 无桌面环境时去掉`--display`。程序输出以下状态之一：
 
@@ -227,11 +217,10 @@ PYTHONPATH=src python3 -m facebox.app run \
 
 ```bash
 PYTHONPATH=src python3 -m facebox.app benchmark \
-  --source picamera2 \
   --trials 20
 ```
 
-USB摄像头则改为：
+非默认 USB 设备则指定：
 
 ```bash
 PYTHONPATH=src python3 -m facebox.app benchmark \
@@ -283,13 +272,13 @@ PYTHONPATH=src python3 -m facebox.app benchmark \
 
 当前交付已完成软件框架和无硬件测试。下面这些只能在你们的树莓派和实际摄像头上验证：
 
-1. Picamera2或`/dev/video0`取帧；
+1. USB 摄像头 `/dev/video0` 取帧；
 2. 老人多光照注册；
 3. 相似度阈值标定；
 4. 明亮、普通、较暗、侧光和逆光测试；
 5. 多位陌生人误放行测试；
 6. 20次实机P95延迟；
-7. 摄像头实际安装距离和OV5647固定焦点清晰度。
+7. USB 摄像头实际安装距离、对焦和低照度清晰度。
 
 ## 13. 红外经过检测通知 Uno
 
@@ -315,9 +304,10 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor \
   --uno-port /dev/serial/by-id/<Arduino-Uno设备>
 ```
 
-通信协议为一行 ASCII 文本：树莓派发送 `PERSON_IN\n`，Uno播放语音后返回
-`ACK\n`。一次进入事件只发送一次；热斑消失、检测器复位且冷却结束后，下一次
-进入才会再次发送。事件日志默认写入 `logs/person_events.csv`。
+通信协议为一行 ASCII 数字加换行：检测到有人经过先发送 `0004\n`，默认等待
+2秒，再按测温结果发送体温过高 `0007\n` 或体温正常 `0008\n`。Uno播放语音后
+可返回 `ACK\n`。一次进入事件只发送一次；热斑消失、检测器复位且冷却结束后，
+下一次进入才会再次发送。事件日志默认写入 `logs/person_events.csv`。
 
 常用参数：
 
@@ -327,6 +317,8 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor \
 - `--clear-seconds 1.5`：人离开多久后复位；
 - `--cooldown-seconds 3.0`：两次通知的最短间隔；
 - `--offset 4.0`：仅用于日志显示的温度校准值，不参与人体检测。
+- `--high-temperature 37.3`：判断体温过高的门槛，部署前必须实测校准；
+- `--audio-gap-seconds 2.0`：`0004` 与体温播报之间的间隔。
 
 先运行无硬件模拟测试：
 
@@ -336,6 +328,17 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 
 按 `Ctrl+C` 停止。红外检测与人脸实时预览是两个独立进程，可分别启动；
 红外模块不会修改人脸模板，也不会保存可见光或红外图像。
+
+人脸实时预览接入同一 Uno R3：
+
+```bash
+PYTHONPATH=src python3 -m facebox.app monitor \
+  --source opencv --device /dev/video0 \
+  --uno-port /dev/serial/by-id/<Arduino-Uno设备>
+```
+
+识别成功发送 `0005\n`，陌生人识别失败发送 `0006\n`。同一张脸持续停留时只
+发送一次，脸离开画面后才会允许下一次播报。多个进程的串口写入由文件锁串行化。
 
 ## 14. 接入云端流感风险
 
@@ -364,6 +367,6 @@ PYTHONPATH=src python3 -m facebox.app flu-monitor --interval 3600
 `data/flu_risk_cache.json`，并输出 `"source":"cache","stale":true`；如果从未
 成功联网且没有缓存，则输出 `ERROR`。若要禁止使用缓存，加 `--no-cache`。
 
-人脸识别、红外检测和流感轮询建议先在三个终端分别运行并验收。仓库暂不自动
-安装 systemd 服务，也不自动把风险等级发送给 Uno；这两项应在树莓派实测和
-通信协议确认后再启用。
+人脸识别、红外检测和流感轮询建议先在三个终端分别运行并验收。每周一10点的
+流感更新服务会在更新成功后把高、中、低风险分别发送为 `0009\n`、`0010\n`、
+`0011\n`，同一周默认只发送一次。

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import os
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -16,8 +18,21 @@ FRAME_LEN = 1544
 HEADER = bytes((0x5A, 0x06, 0x02))
 THERMAL_BAUD = 921600
 UNO_BAUD = 9600
+UNO_ACK_TIMEOUT_SECONDS = 2.0
 EDGE_MARGIN = 3
 PERSON_COMMAND = b"PERSON_IN\n"
+RISK_AUDIO_COMMANDS = {
+    "高": b"0009\n",
+    "中": b"0010\n",
+    "低": b"0011\n",
+}
+EVENT_AUDIO_COMMANDS = {
+    "person_passed": b"0004\n",
+    "face_matched": b"0005\n",
+    "face_failed": b"0006\n",
+    "temperature_high": b"0007\n",
+    "temperature_normal": b"0008\n",
+}
 
 
 def parse_frame(buffer: bytes):
@@ -250,28 +265,110 @@ class ThermalSerialReader:
 
 
 class UnoNotifier:
-    """Send the agreed newline-delimited PERSON_IN command to an Arduino Uno."""
+    """Send newline-delimited commands to an Arduino Uno R3."""
 
     def __init__(
         self,
         port: str,
         baud: int = UNO_BAUD,
+        ack_timeout: float = UNO_ACK_TIMEOUT_SECONDS,
         reset_delay: float = 2.0,
         serial_factory=None,
         sleep: Callable[[float], None] = time.sleep,
     ):
+        if ack_timeout <= 0:
+            raise ValueError("ack_timeout must be positive")
         if serial_factory is None:
             import serial
 
             serial_factory = serial.Serial
-        self.serial = serial_factory(port, baud, timeout=0.5)
-        sleep(reset_delay)
+        self.ack_timeout = ack_timeout
+        self.serial = serial_factory(port, baud, timeout=ack_timeout)
+        self.sleep = sleep
+        self.lock_path = (
+            Path(os.environ.get("FACEBOX_UNO_LOCK", "/tmp/facebox-uno.lock"))
+            if os.name == "posix"
+            else None
+        )
+        self.sleep(reset_delay)
+
+    @contextmanager
+    def _exclusive(self):
+        """Serialize writes from face, thermal and weekly worker processes."""
+        if self.lock_path is None:
+            yield
+            return
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("a", encoding="ascii") as handle:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def _exchange(self, command: bytes) -> bool:
+        self.serial.write(command)
+        self.serial.flush()
+        deadline = time.monotonic() + self.ack_timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            try:
+                self.serial.timeout = remaining
+            except (AttributeError, TypeError):
+                pass
+            reply = self.serial.readline().decode("ascii", errors="ignore").strip()
+            if reply == "ACK":
+                return True
+            if reply == "ERR" or not reply:
+                return False
+            # 调试固件可能在 ACK 前输出诊断行；忽略后继续等待正式回复。
+
+    def notify(self, command: bytes) -> bool:
+        if not command.endswith(b"\n") or not command[:-1].decode("ascii").isdigit():
+            if command != PERSON_COMMAND:
+                raise ValueError("Uno command must be ASCII digits followed by a newline")
+        with self._exclusive():
+            return self._exchange(command)
 
     def notify_person(self) -> bool:
-        self.serial.write(PERSON_COMMAND)
-        self.serial.flush()
-        reply = self.serial.readline().decode("ascii", errors="ignore").strip()
-        return reply == "ACK"
+        return self.notify(PERSON_COMMAND)
+
+    def notify_risk(self, risk_level: str) -> tuple[str, bool]:
+        try:
+            command = RISK_AUDIO_COMMANDS[risk_level]
+        except KeyError as error:
+            raise ValueError(f"unsupported flu risk level: {risk_level}") from error
+        return command.decode("ascii").strip(), self.notify(command)
+
+    def notify_event(self, event_name: str) -> tuple[str, bool]:
+        try:
+            command = EVENT_AUDIO_COMMANDS[event_name]
+        except KeyError as error:
+            raise ValueError(f"unsupported Uno event: {event_name}") from error
+        return command.decode("ascii").strip(), self.notify(command)
+
+    def notify_event_sequence(
+        self, event_names: list[str], gap_seconds: float = 0.0
+    ) -> list[tuple[str, bool]]:
+        if gap_seconds < 0:
+            raise ValueError("audio gap must not be negative")
+        try:
+            commands = [EVENT_AUDIO_COMMANDS[name] for name in event_names]
+        except KeyError as error:
+            raise ValueError(f"unsupported Uno event: {error.args[0]}") from error
+        results = []
+        with self._exclusive():
+            for index, command in enumerate(commands):
+                results.append(
+                    (command.decode("ascii").strip(), self._exchange(command))
+                )
+                if index + 1 < len(commands):
+                    self.sleep(gap_seconds)
+        return results
 
     def close(self) -> None:
         self.serial.close()

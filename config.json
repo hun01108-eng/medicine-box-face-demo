@@ -2,6 +2,8 @@
   "detector_model": "models/face_detection_yunet_2023mar.onnx",
   "recognizer_model": "models/face_recognition_sface_2021dec.onnx",
   "profile_path": "data/elder_001.json",
+  "camera_source": "opencv",
+  "camera_device": "/dev/video0",
   "camera_width": 640,
   "camera_height": 480,
   "detector_score_threshold": 0.85,

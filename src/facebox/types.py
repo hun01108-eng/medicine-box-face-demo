@@ -19,6 +19,7 @@ class FrameObservation:
     similarity: Optional[float]
     quality_reason: str = ""
     processed_at: Optional[float] = None
+    face_box: Optional[tuple[int, int, int, int]] = None
 
 
 @dataclass(frozen=True)

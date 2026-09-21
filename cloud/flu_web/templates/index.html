@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>流感监测月报</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">公共卫生监测</p>
+      <h1>流感风险月报</h1>
+    </div>
+    {% if months %}
+    <form method="get" class="month-picker">
+      <label for="month">查看月份</label>
+      <select id="month" name="month" onchange="this.form.submit()">
+        {% for month in months %}
+        <option value="{{ month }}" {% if month == selected_month %}selected{% endif %}>{{ month }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    {% endif %}
+  </header>
+
+  <main>
+    {% if not selected_month %}
+    <section class="empty-state">
+      <h2>暂无周报数据</h2>
+      <p>请先运行 <code>python update_db_curl.py</code> 下载并解析最新周报。</p>
+    </section>
+    {% else %}
+    <section class="monthly-section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">{{ selected_month }}</p>
+          <h2>AI 月度分析</h2>
+        </div>
+        {% if monthly_report %}
+        <span class="risk risk-{{ monthly_report.risk_level }}">{{ monthly_report.risk_level }}风险</span>
+        {% endif %}
+      </div>
+
+      {% if monthly_report %}
+      <p class="summary">{{ monthly_report.summary }}</p>
+      <div class="report-body">{{ monthly_report.full_report }}</div>
+      <h3>防护建议</h3>
+      <ul class="advice-list">
+        {% for item in monthly_report.advice %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+      <p class="meta">生成时间：{{ monthly_report.generated_at }} · 模型：{{ monthly_report.model_name }}</p>
+      {% else %}
+      <div class="empty-report">
+        <p>本月周报已就绪，但还没有生成 AI 月报。</p>
+        <button id="generate-report" data-month="{{ selected_month }}">生成本月月报</button>
+        <p id="generate-status" role="status" aria-live="polite"></p>
+      </div>
+      {% endif %}
+    </section>
+
+    {% if weekly_reports %}
+    <section class="charts-section" aria-labelledby="charts-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">月度概览</p>
+          <h2 id="charts-title">监测数据图表</h2>
+        </div>
+      </div>
+      <div class="chart-grid">
+        <article class="chart-panel chart-panel-wide">
+          <h3>南北方阳性率趋势</h3>
+          <div id="positivity-chart" class="chart" role="img" aria-label="各周南北方流感病毒检测阳性率折线图"></div>
+        </article>
+        <article class="chart-panel">
+          <h3>每周暴发疫情数量</h3>
+          <div id="outbreak-chart" class="chart" role="img" aria-label="各周流感样病例暴发疫情数量柱状图"></div>
+        </article>
+        <article class="chart-panel">
+          <h3>周风险等级分布</h3>
+          <div id="risk-chart" class="chart" role="img" aria-label="高、中、低周风险数量分布图"></div>
+        </article>
+      </div>
+    </section>
+    <script id="weekly-chart-data" type="application/json">{{ chart_reports|tojson }}</script>
+    {% endif %}
+
+    <section class="weekly-section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">原始资料</p>
+          <h2>本月周报</h2>
+        </div>
+        <span class="count">{{ weekly_reports|length }} 份</span>
+      </div>
+
+      <div class="weekly-list">
+        {% for report in weekly_reports %}
+        <article class="weekly-card">
+          <div class="weekly-title">
+            <div>
+              <h3>{{ report.report_week }}</h3>
+              <p>{{ report.report_date or '日期未知' }}</p>
+            </div>
+            <span class="risk risk-{{ report.risk_level or '低' }}">{{ report.risk_level or '低' }}风险</span>
+          </div>
+          <div class="metrics">
+            <span>南方阳性率 <strong>{{ report.south_positivity_rate if report.south_positivity_rate is not none else '—' }}%</strong></span>
+            <span>北方阳性率 <strong>{{ report.north_positivity_rate if report.north_positivity_rate is not none else '—' }}%</strong></span>
+            <span>暴发疫情 <strong>{{ report.outbreak_status or '未知' }}</strong></span>
+          </div>
+          <p class="risk-reason">{{ report.risk_reason or '暂无风险说明' }}</p>
+          <div class="actions">
+            {% if report.pdf_path or report.pdf_url or report.detail_url %}<a href="{{ url_for('original_report', report_week=report.report_week) }}" target="_blank">查看原始 PDF</a>{% endif %}
+            {% if report.detail_url %}<a href="{{ report.detail_url }}" target="_blank" rel="noopener">查看来源网页</a>{% endif %}
+          </div>
+        </article>
+        {% else %}
+        <p>该月份暂无周报。</p>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

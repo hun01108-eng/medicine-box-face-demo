@@ -7,9 +7,10 @@ from pathlib import Path
 
 from .camera import OpenCVCamera, Picamera2Camera
 from .config import AppConfig, load_config
-from .decision import MultiFrameDecision
+from .decision import ContinuousDecision, MultiFrameDecision
 from .metrics import summarize_latencies
 from .templates import TemplateStore
+from .thermal import UNO_BAUD, UnoNotifier
 from .types import FrameObservation, IdentityResult, IdentityStatus
 
 
@@ -89,13 +90,48 @@ def open_camera(source: str, device: str, config: AppConfig):
     return OpenCVCamera(parsed_device, config.camera_width, config.camera_height)
 
 
-def run_live(source: str, device: str, display: bool, config: AppConfig, root: Path) -> int:
+def identity_audio_event(result: IdentityResult) -> str | None:
+    if result.status == IdentityStatus.MATCHED:
+        return "face_matched"
+    if result.status in {IdentityStatus.UNKNOWN, IdentityStatus.RETRY}:
+        return "face_failed"
+    return None
+
+
+def notify_identity(result: IdentityResult, notifier: UnoNotifier | None) -> None:
+    event_name = identity_audio_event(result)
+    if notifier is None or event_name is None:
+        return
+    audio_code, acknowledged = notifier.notify_event(event_name)
+    print(
+        json.dumps(
+            {
+                "status": "FACE_AUDIO_SENT",
+                "audio_code": audio_code,
+                "uno_ack": acknowledged,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    )
+
+
+def run_live(
+    source: str,
+    device: str,
+    display: bool,
+    config: AppConfig,
+    root: Path,
+    uno_port: str | None = None,
+    uno_baud: int = UNO_BAUD,
+) -> int:
     if display:
         import cv2
     profile = TemplateStore(root / config.profile_path).load()
     engine = build_engine(config, root)
     decision = MultiFrameDecision(config.decision)
     camera = open_camera(source, device, config)
+    notifier = UnoNotifier(uno_port, uno_baud) if uno_port else None
     try:
         for frame in camera.frames():
             observation = engine.observe(frame, profile)
@@ -109,13 +145,109 @@ def run_live(source: str, device: str, display: bool, config: AppConfig, root: P
             terminal = result.status in {IdentityStatus.MATCHED, IdentityStatus.UNKNOWN}
             terminal = terminal or (result.status == IdentityStatus.RETRY and result.reason in {"multiple_faces", "timeout"})
             if terminal:
+                notify_identity(result, notifier)
                 emit(result)
                 return exit_code(result.status)
     finally:
         camera.close()
+        if notifier is not None:
+            notifier.close()
         if display:
             cv2.destroyAllWindows()
     return 4
+
+
+class OverlayRenderer:
+    def __init__(self, cv2):
+        self.cv2 = cv2
+        self.font = None
+        font_path = Path("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf")
+        if hasattr(cv2, "freetype") and font_path.is_file():
+            self.font = cv2.freetype.createFreeType2()
+            self.font.loadFontData(fontFileName=str(font_path), idx=0)
+
+    def put_text(self, frame, text: str, origin: tuple[int, int], color, height: int = 24) -> None:
+        if self.font is not None:
+            self.font.putText(frame, text, origin, height, color, 1, self.cv2.LINE_AA, True)
+            return
+        ascii_text = text.encode("ascii", "replace").decode("ascii")
+        self.cv2.putText(
+            frame,
+            ascii_text,
+            origin,
+            self.cv2.FONT_HERSHEY_SIMPLEX,
+            height / 32.0,
+            color,
+            2,
+            self.cv2.LINE_AA,
+        )
+
+
+def monitor_label(observation: FrameObservation, result: IdentityResult) -> tuple[str, tuple[int, int, int]]:
+    score = "" if observation.similarity is None else f"  {observation.similarity:.3f}"
+    if result.status == IdentityStatus.MATCHED:
+        return f"已识别：{result.user_id}{score}", (0, 220, 0)
+    if result.status == IdentityStatus.UNKNOWN:
+        return f"未识别：陌生人{score}", (0, 0, 255)
+    reasons = {
+        "no_face": "未检测到人脸",
+        "multiple_faces": "检测到多人",
+        "too_dark": "画面太暗",
+        "too_bright": "画面过亮",
+        "too_blurry": "画面模糊",
+        "face_too_small": "请靠近摄像头",
+        "poor_quality": "画面质量不足",
+    }
+    if result.reason in reasons:
+        return reasons[result.reason], (0, 165, 255)
+    return f"识别中…{score}", (0, 220, 255)
+
+
+def monitor_live(
+    source: str,
+    device: str,
+    config: AppConfig,
+    root: Path,
+    uno_port: str | None = None,
+    uno_baud: int = UNO_BAUD,
+) -> int:
+    import cv2
+
+    profile = TemplateStore(root / config.profile_path).load()
+    engine = build_engine(config, root)
+    decision = ContinuousDecision(config.decision)
+    renderer = OverlayRenderer(cv2)
+    camera = open_camera(source, device, config)
+    notifier = UnoNotifier(uno_port, uno_baud) if uno_port else None
+    identity_announced = False
+    window_name = "FaceBox Live Recognition - q to quit"
+    try:
+        for frame in camera.frames():
+            observation = engine.observe(frame, profile)
+            result = decision.update(observation)
+            if observation.face_count == 0:
+                identity_announced = False
+            elif result.status in {IdentityStatus.MATCHED, IdentityStatus.UNKNOWN}:
+                if not identity_announced:
+                    notify_identity(result, notifier)
+                    identity_announced = True
+            label, color = monitor_label(observation, result)
+            if observation.face_box is not None:
+                x, y, width, height = observation.face_box
+                x, y = max(0, x), max(0, y)
+                cv2.rectangle(frame, (x, y), (x + width, y + height), color, 2)
+                renderer.put_text(frame, label, (x, max(28, y - 8)), color)
+            else:
+                renderer.put_text(frame, label, (20, 35), color)
+            cv2.imshow(window_name, frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                return 0
+    finally:
+        camera.close()
+        if notifier is not None:
+            notifier.close()
+        cv2.destroyAllWindows()
+    return 0
 
 
 def benchmark_live(source: str, device: str, trials: int, config: AppConfig, root: Path) -> int:
@@ -176,12 +308,19 @@ def parser() -> argparse.ArgumentParser:
     enrollment.add_argument("--images", type=Path, required=True)
     enrollment.add_argument("--minimum", type=int, default=5)
     live = commands.add_parser("run")
-    live.add_argument("--source", choices=["picamera2", "opencv"], default="picamera2")
-    live.add_argument("--device", default="0")
+    live.add_argument("--source", choices=["picamera2", "opencv"], help="defaults to config camera_source")
+    live.add_argument("--device", help="defaults to config camera_device")
     live.add_argument("--display", action="store_true")
+    live.add_argument("--uno-port")
+    live.add_argument("--uno-baud", type=int, default=UNO_BAUD)
+    monitor = commands.add_parser("monitor", help="show continuous face recognition preview")
+    monitor.add_argument("--source", choices=["picamera2", "opencv"], help="defaults to config camera_source")
+    monitor.add_argument("--device", help="defaults to config camera_device")
+    monitor.add_argument("--uno-port")
+    monitor.add_argument("--uno-baud", type=int, default=UNO_BAUD)
     benchmark = commands.add_parser("benchmark")
-    benchmark.add_argument("--source", choices=["picamera2", "opencv"], default="picamera2")
-    benchmark.add_argument("--device", default="0")
+    benchmark.add_argument("--source", choices=["picamera2", "opencv"], help="defaults to config camera_source")
+    benchmark.add_argument("--device", help="defaults to config camera_device")
     benchmark.add_argument("--trials", type=int, default=20)
     commands.add_parser("self-check")
     thermal = commands.add_parser(
@@ -197,6 +336,10 @@ def parser() -> argparse.ArgumentParser:
 
     add_flu_arguments(flu_status)
     add_flu_arguments(flu_monitor, monitor=True)
+    flu_audio = commands.add_parser("flu-audio", help="send the weekly risk audio number to an Uno R3")
+    from .flu_app import add_flu_audio_arguments
+
+    add_flu_audio_arguments(flu_audio)
     return result
 
 
@@ -211,18 +354,43 @@ def main() -> int:
         if arguments.command == "enroll":
             return enroll(arguments.images, config, root, arguments.minimum)
         if arguments.command == "run":
-            return run_live(arguments.source, arguments.device, arguments.display, config, root)
+            return run_live(
+                arguments.source or config.camera_source,
+                arguments.device or config.camera_device,
+                arguments.display,
+                config,
+                root,
+                arguments.uno_port,
+                arguments.uno_baud,
+            )
+        if arguments.command == "monitor":
+            return monitor_live(
+                arguments.source or config.camera_source,
+                arguments.device or config.camera_device,
+                config,
+                root,
+                arguments.uno_port,
+                arguments.uno_baud,
+            )
         if arguments.command == "benchmark":
-            return benchmark_live(arguments.source, arguments.device, arguments.trials, config, root)
+            return benchmark_live(
+                arguments.source or config.camera_source,
+                arguments.device or config.camera_device,
+                arguments.trials,
+                config,
+                root,
+            )
         if arguments.command == "thermal-monitor":
             from .thermal_app import run_thermal_monitor
 
             return run_thermal_monitor(arguments)
-        if arguments.command in {"flu-status", "flu-monitor"}:
-            from .flu_app import run_flu_monitor, run_flu_status
+        if arguments.command in {"flu-status", "flu-monitor", "flu-audio"}:
+            from .flu_app import run_flu_audio, run_flu_monitor, run_flu_status
 
             if arguments.command == "flu-status":
                 return run_flu_status(arguments, config, root)
+            if arguments.command == "flu-audio":
+                return run_flu_audio(arguments, config, root)
             return run_flu_monitor(arguments, config, root)
         return self_check(config, root)
     except (FileNotFoundError, RuntimeError, ValueError, OSError) as error:

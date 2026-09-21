@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the weekly flu warning every Monday at 10:00
+
+[Timer]
+OnCalendar=Mon *-*-* 10:00:00
+Persistent=true
+Unit=flu-weekly-update.service
+
+[Install]
+WantedBy=timers.target
