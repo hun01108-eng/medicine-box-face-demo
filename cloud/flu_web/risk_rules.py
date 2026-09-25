@@ -1,10 +1,17 @@
+"""可审计的每周流感风险分级规则。
+
+输出是公共卫生信息风险标签，不是个人感染概率或医学诊断。确定性规则保证相同
+周报数据得到相同结果，也避免每周依赖大模型。
+"""
+
+# 阈值集中定义，便于后续根据专家意见统一调整。
 SOUTH_HIGH_THRESHOLD = 15.0
 NORTH_MEDIUM_THRESHOLD = 10.0
 RESISTANCE_MEDIUM_THRESHOLD = 5.0
 
 
 def assess_weekly_risk(data):
-    """使用确定性规则生成周报风险标签，避免每周调用 AI。"""
+    """根据官方周报指标返回 ``(风险等级, 触发原因)``。"""
     high_reasons = []
     medium_reasons = []
 

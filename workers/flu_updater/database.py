@@ -1,3 +1,8 @@
+"""树莓派周报更新器使用的本地缓存数据库。
+
+树莓派缓存写入成功不等于云端接收成功；正式展示数据仍以云端接收接口为准。
+"""
+
 from pathlib import Path
 import os
 import sqlite3
@@ -22,12 +27,14 @@ class ClosingConnection(sqlite3.Connection):
 
 
 def connect_db():
+    """创建按字段名访问的短连接；退出with语句后自动关闭。"""
     conn = sqlite3.connect(DB_PATH, factory=ClosingConnection)
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def ensure_schema():
+    """初始化缓存数据库，并兼容早期版本缺少的新增字段。"""
     ORIGINAL_REPORT_DIR.mkdir(parents=True, exist_ok=True)
     with connect_db() as conn:
         conn.execute(
@@ -84,7 +91,7 @@ def ensure_schema():
 
 
 def save_weekly_report(data, detail_url, pdf_url, pdf_path, report_date):
-    """Store one parsed weekly report and compute its deterministic risk level."""
+    """计算确定性周风险，并按周次新增或更新一条缓存记录。"""
     ensure_schema()
     risk_input = {
         "south_positivity_rate": data["south_rate"],
@@ -98,13 +105,32 @@ def save_weekly_report(data, detail_url, pdf_url, pdf_path, report_date):
     with connect_db() as conn:
         conn.execute(
             """
-            INSERT OR REPLACE INTO flu_reports (
+            INSERT INTO flu_reports (
                 report_week, south_positivity_rate, north_positivity_rate, outbreak_count,
                 south_trend, north_trend, outbreak_status, detail_url, updated_at,
                 h1n1_antigen_ratio, h3n2_antigen_ratio, b_antigen_ratio,
                 h3n2_resistance_ratio, report_date, report_month, pdf_url, pdf_path,
                 risk_level, risk_reason
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(report_week) DO UPDATE SET
+                south_positivity_rate = excluded.south_positivity_rate,
+                north_positivity_rate = excluded.north_positivity_rate,
+                outbreak_count = excluded.outbreak_count,
+                south_trend = excluded.south_trend,
+                north_trend = excluded.north_trend,
+                outbreak_status = excluded.outbreak_status,
+                detail_url = excluded.detail_url,
+                updated_at = excluded.updated_at,
+                h1n1_antigen_ratio = excluded.h1n1_antigen_ratio,
+                h3n2_antigen_ratio = excluded.h3n2_antigen_ratio,
+                b_antigen_ratio = excluded.b_antigen_ratio,
+                h3n2_resistance_ratio = excluded.h3n2_resistance_ratio,
+                report_date = excluded.report_date,
+                report_month = excluded.report_month,
+                pdf_url = excluded.pdf_url,
+                pdf_path = excluded.pdf_path,
+                risk_level = excluded.risk_level,
+                risk_reason = excluded.risk_reason
             """,
             (
                 data["report_week"], data["south_rate"], data["north_rate"],

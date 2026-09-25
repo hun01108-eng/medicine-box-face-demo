@@ -1,34 +1,37 @@
-# AI 流感月报网站
+# 云端流感风险信息网站
+
+本目录部署在云服务器，负责接收树莓派上传的官方周报数据与原始 PDF、保存
+SQLite 数据、展示周报及图表、调用 DeepSeek 生成月报，并向已关注用户发送
+微信公众号模板消息。周风险是可审计规则的结果，AI 仅用于月度文字归纳，均不
+代表个人诊断或医疗处方。
 
 ## 1. 安装依赖
 
-本机同时安装了 Python 3.13 和 3.14。本项目统一使用已经装好依赖的 Python 3.13：
+推荐使用独立虚拟环境安装依赖：
 
-```powershell
-python3.13 -m pip install -r requirements.txt
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
-
-安装过程中出现 `Scripts is not on PATH` 是警告，不影响本项目运行。看到
-`Successfully installed` 后即表示安装完成。
 
 ## 2. 更新最新周报
 
-```powershell
-python3.13 update_db_curl.py
+```bash
+.venv/bin/python update_db_curl.py
 ```
 
 程序会保存疾控中心原始 PDF、解析数据，并使用本地规则生成周风险等级。
 
 批量补录某个月份已经发布的周报：
 
-```powershell
-python3.13 import_history.py --month 2026-09
+```bash
+.venv/bin/python import_history.py --month 2026-09
 ```
 
 ## 3. 配置 DeepSeek 密钥
 
-```powershell
-$env:DEEPSEEK_API_KEY="替换为重新生成的密钥"
+```bash
+export DEEPSEEK_API_KEY="替换为重新生成的密钥"
 ```
 
 不要把密钥写进 Python 文件或提交到版本库。
@@ -37,8 +40,8 @@ $env:DEEPSEEK_API_KEY="替换为重新生成的密钥"
 
 可以从终端生成：
 
-```powershell
-python3.13 ai_flu_alert.py --month 2026-09
+```bash
+.venv/bin/python ai_flu_alert.py --month 2026-09
 ```
 
 ## 树莓派更新、云服务器展示
@@ -52,17 +55,34 @@ python update_db_curl.py \
   --token-file /home/pi/medicine-box/secrets/flu_ingest_token
 ```
 
-云端接收接口为 `POST /api/ingest/weekly`，必须使用独立 Bearer Token；
-DeepSeek API Key 只保留在云服务器，不复制到树莓派。
+云端接收接口为 `POST /api/ingest/weekly`，必须使用独立 Bearer Token。令牌
+保存在 `FLU_INGEST_TOKEN_FILE` 指定的服务器文件中；DeepSeek API Key 只保留
+在云服务器，不复制到树莓派。
 
 也可以启动网站后，在页面上点击“生成本月月报”。同一月份已有月报时不会重复调用 AI。
 
-## 5. 启动网站
+## 5. 配置微信公众号推送
 
-```powershell
-python3.13 start_web.py
+在云端服务环境中设置以下变量；任一必填项缺失时，推送会自动停用，但周报仍会
+正常入库：
+
+```bash
+export WECHAT_APP_ID="公众号AppID"
+export WECHAT_APP_SECRET="公众号AppSecret"
+export WECHAT_TEMPLATE_ID="模板ID"
+export WECHAT_OPENIDS="openid1,openid2"
+export WECHAT_REPORT_URL="https://你的域名/"
 ```
 
-如果环境变量没有生效，启动脚本会在终端中安全询问 DeepSeek API Key，输入内容
-不会显示，也不会写入代码。启动脚本会自动打开 `http://127.0.0.1:5000`。终端窗口必须保持开启；按
-`Ctrl+C` 可以关闭网站。
+云端对相同“周次 + openid”的成功推送自动去重。失败状态会记入数据库，下次
+收到同一周数据时允许重试。凭据不得写入源码或提交到 Git。
+
+## 6. 启动网站
+
+```bash
+.venv/bin/python app.py
+```
+
+`app.py` 默认只监听 `127.0.0.1:5000` 且关闭调试模式。正式部署建议使用现有
+WSGI 服务并由 Nginx 反向代理；不要在公网启用 `FLU_WEB_DEBUG`。Windows 本地
+联调仍可使用 `python start_web.py` 自动打开浏览器。

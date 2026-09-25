@@ -1,10 +1,17 @@
+"""树莓派端可审计的每周流感风险分级规则。
+
+这是云端规则的独立部署镜像，便于树莓派断网时生成本地缓存；两端阈值和逻辑
+必须保持一致。结果仅代表公共卫生信息风险，不用于个人诊断。
+"""
+
+# 阈值集中定义，便于后续根据专家意见统一调整。
 SOUTH_HIGH_THRESHOLD = 15.0
 NORTH_MEDIUM_THRESHOLD = 10.0
 RESISTANCE_MEDIUM_THRESHOLD = 5.0
 
 
 def assess_weekly_risk(data):
-    """使用确定性规则生成周报风险标签，避免每周调用 AI。"""
+    """根据官方周报指标返回 ``(风险等级, 触发原因)``。"""
     high_reasons = []
     medium_reasons = []
 

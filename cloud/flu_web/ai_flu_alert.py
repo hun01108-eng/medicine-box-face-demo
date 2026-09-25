@@ -93,6 +93,9 @@ def build_prompt(report_month, weekly_data):
 
 
 def parse_ai_json(content):
+    """解析并严格校验模型输出，避免不完整内容进入正式月报。"""
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("AI 返回内容为空")
     cleaned = content.strip()
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.I)
     result = json.loads(cleaned)
@@ -102,8 +105,15 @@ def parse_ai_json(content):
         raise ValueError(f"AI 返回缺少字段: {', '.join(sorted(missing))}")
     if result["risk_level"] not in {"高", "中", "低"}:
         raise ValueError("AI 返回的 risk_level 必须是高、中或低")
-    if not isinstance(result["advice"], list):
-        raise ValueError("AI 返回的 advice 必须是数组")
+    for field, label in (("summary", "summary"), ("full_report", "full_report")):
+        if not isinstance(result[field], str) or not result[field].strip():
+            raise ValueError(f"AI 返回的 {label} 必须是非空字符串")
+        result[field] = result[field].strip()
+    if not isinstance(result["advice"], list) or not 1 <= len(result["advice"]) <= 5:
+        raise ValueError("AI 返回的 advice 必须是包含1至5项的数组")
+    if any(not isinstance(item, str) or not item.strip() for item in result["advice"]):
+        raise ValueError("AI 返回的每条 advice 必须是非空字符串")
+    result["advice"] = [item.strip() for item in result["advice"]]
     return result
 
 
@@ -171,13 +181,13 @@ def main():
     report_month = args.month or (months[0] if months else None)
     if not report_month:
         print("❌ 暂无周报数据，请先运行 update_db_curl.py")
-        return
+        return 1
 
     try:
         report, generated = generate_monthly_report(report_month, force=args.force)
     except Exception as exc:
         print(f"❌ 月报生成失败: {exc}")
-        return
+        return 1
 
     print(f"✅ {'已生成' if generated else '已读取'} {report_month} AI 月报")
     print(f"风险等级：{report['risk_level']}")
@@ -185,7 +195,8 @@ def main():
     print("防护建议：")
     for item in report["advice"]:
         print(f"- {item}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

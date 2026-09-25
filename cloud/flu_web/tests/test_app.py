@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import database
-from ai_flu_alert import validate_api_key
+from ai_flu_alert import parse_ai_json, validate_api_key
 
 
 class FluWebTest(unittest.TestCase):
@@ -66,7 +66,9 @@ class FluWebTest(unittest.TestCase):
             data={"metadata": json.dumps(metadata), "pdf": (io.BytesIO(b"%PDF-test"), "report.pdf")},
         )
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.get_json()["data"]["report_week"], "2026-W36")
+        body = response.get_json()
+        self.assertEqual(body["data"]["report_week"], "2026-W36")
+        self.assertEqual(body["wechat_push"]["status"], "disabled")
         self.assertTrue((database.ORIGINAL_REPORT_DIR / "2026-W36-流感周报.pdf").is_file())
 
     def seed_week(self):
@@ -133,6 +135,27 @@ class FluWebTest(unittest.TestCase):
 
     def test_api_key_accepts_ascii_key(self):
         self.assertEqual(validate_api_key("  sk-test123  "), "sk-test123")
+
+    def test_ai_result_rejects_empty_report_fields(self):
+        content = json.dumps(
+            {"risk_level": "中", "summary": "", "full_report": "分析", "advice": ["建议"]},
+            ensure_ascii=False,
+        )
+        with self.assertRaisesRegex(ValueError, "summary"):
+            parse_ai_json(content)
+
+    def test_weekly_upsert_preserves_database_identity(self):
+        self.seed_week()
+        with database.connect_db() as conn:
+            before = conn.execute(
+                "SELECT id FROM flu_reports WHERE report_week = ?", ("2026-W36",)
+            ).fetchone()["id"]
+        self.seed_week()
+        with database.connect_db() as conn:
+            after = conn.execute(
+                "SELECT id FROM flu_reports WHERE report_week = ?", ("2026-W36",)
+            ).fetchone()["id"]
+        self.assertEqual(before, after)
 
     def test_pdf_falls_back_to_official_url(self):
         self.seed_week()

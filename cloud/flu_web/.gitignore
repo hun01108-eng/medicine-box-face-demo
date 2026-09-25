@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 flu_data.db
 reports/original/*.pdf
+wechat_push.local.json

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""流感月报与原始周报展示网站。"""
+"""云端流感风险信息服务。
+
+本模块保存树莓派上传的周报与原始 PDF，提供网页/API，并在入库成功后尝试
+发送微信公众号模板消息。微信服务不可用时只记录错误，不影响周报入库。
+"""
 
 import json
 import os
@@ -15,6 +19,7 @@ from urllib.parse import urlparse
 
 from ai_flu_alert import generate_monthly_report, get_available_months
 from database import ORIGINAL_REPORT_DIR, connect_db, ensure_schema, save_weekly_report
+from wechat_push import push_weekly_report
 
 
 app = Flask(__name__)
@@ -175,13 +180,23 @@ def api_ingest_weekly():
         )
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
+    report = {
+        "report_week": report_week,
+        "risk_level": risk_level,
+        "risk_reason": risk_reason,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    try:
+        wechat_result = push_weekly_report(report)
+    except Exception as exc:
+        # 外部推送故障不应让树莓派误以为周报上传失败并反复重传 PDF。
+        app.logger.exception("周报已入库，但微信推送流程异常")
+        wechat_result = {"status": "failed", "message": str(exc)}
+
     return jsonify({
         "status": "success",
-        "data": {
-            "report_week": report_week,
-            "risk_level": risk_level,
-            "risk_reason": risk_reason,
-        },
+        "data": report,
+        "wechat_push": wechat_result,
     })
 
 
@@ -242,4 +257,10 @@ def api_health():
 
 if __name__ == "__main__":
     ensure_schema()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    debug = os.getenv("FLU_WEB_DEBUG", "").lower() in {"1", "true", "yes"}
+    app.run(
+        host=os.getenv("FLU_WEB_HOST", "127.0.0.1"),
+        port=int(os.getenv("FLU_WEB_PORT", "5000")),
+        debug=debug,
+        use_reloader=debug,
+    )
