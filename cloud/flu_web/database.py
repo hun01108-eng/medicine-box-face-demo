@@ -1,4 +1,4 @@
-"""流感周报、规则风险、AI月报和微信推送记录的SQLite持久化层。"""
+"""流感周报、规则风险和AI月报的SQLite持久化层。"""
 
 from pathlib import Path
 import os
@@ -85,21 +85,6 @@ def ensure_schema():
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS wechat_push_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                report_week TEXT NOT NULL,
-                openid TEXT NOT NULL,
-                risk_level TEXT NOT NULL,
-                status TEXT NOT NULL,
-                message_id TEXT,
-                error_message TEXT,
-                attempted_at TEXT NOT NULL,
-                UNIQUE(report_week, openid)
-            )
-            """
-        )
 
 
 def save_weekly_report(data, detail_url, pdf_url, pdf_path, report_date):
@@ -155,52 +140,6 @@ def save_weekly_report(data, detail_url, pdf_url, pdf_path, report_date):
             ),
         )
     return risk_level, risk_reason
-
-
-def get_wechat_push(report_week, openid):
-    """读取某一周向某一用户的最近推送结果。"""
-    ensure_schema()
-    with connect_db() as conn:
-        return conn.execute(
-            "SELECT * FROM wechat_push_log WHERE report_week = ? AND openid = ?",
-            (report_week, openid),
-        ).fetchone()
-
-
-def save_wechat_push(
-    report_week,
-    openid,
-    risk_level,
-    status,
-    message_id=None,
-    error_message=None,
-):
-    """保存推送结果；同一周和用户始终只保留一条状态记录。"""
-    ensure_schema()
-    with connect_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO wechat_push_log (
-                report_week, openid, risk_level, status,
-                message_id, error_message, attempted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(report_week, openid) DO UPDATE SET
-                risk_level = excluded.risk_level,
-                status = excluded.status,
-                message_id = excluded.message_id,
-                error_message = excluded.error_message,
-                attempted_at = excluded.attempted_at
-            """,
-            (
-                report_week,
-                openid,
-                risk_level,
-                status,
-                str(message_id) if message_id is not None else None,
-                error_message,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            ),
-        )
 
 
 ensure_schema()

@@ -6,3 +6,4 @@ enrollment_images/*
 data/*.json
 *.log
 logs/*.csv
+logs/*.json

@@ -1,8 +1,0 @@
-{
-  "app_id": "请替换为测试号AppID",
-  "app_secret": "请替换为测试号AppSecret",
-  "openid": "请替换为接收用户openid",
-  "template_id": "请替换为测试模板ID",
-  "weekly_api_url": "http://127.0.0.1:5000/api/weekly",
-  "report_url": ""
-}

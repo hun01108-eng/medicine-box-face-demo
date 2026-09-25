@@ -68,7 +68,7 @@ class FluWebTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         body = response.get_json()
         self.assertEqual(body["data"]["report_week"], "2026-W36")
-        self.assertEqual(body["wechat_push"]["status"], "disabled")
+        self.assertEqual(set(body), {"status", "data"})
         self.assertTrue((database.ORIGINAL_REPORT_DIR / "2026-W36-流感周报.pdf").is_file())
 
     def seed_week(self):

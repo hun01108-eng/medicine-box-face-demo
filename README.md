@@ -14,8 +14,7 @@
 - **边缘智能：** 人脸图像与身份模板保留在树莓派本地，不上传云端。
 - **多传感协同：** USB 摄像头与红外阵列相互独立，单项故障不阻塞其他模块。
 - **开放集人脸识别：** 只确认已注册用户，陌生人、多人和低质量画面均安全拒绝。
-- **公共卫生风险服务：** 自动获取官方流感周报，完成解析、风险分级、网页展示和
-  微信通知。
+- **公共卫生风险服务：** 自动获取官方流感周报，完成解析、风险分级和网页展示。
 - **端云分工：** 树莓派负责采集、识别和现场播报；云端负责 API、数据库、月报及
   用户访问。
 - **统一串口协议：** 树莓派以四位数字指令控制 Uno R3 播放对应语音，并等待 ACK。
@@ -38,7 +37,6 @@ flowchart LR
         API[Flask API] --> DB[(SQLite)]
         DB --> WEB[周报/月报网页]
         DB --> AI[DeepSeek 月度归纳]
-        API --> WECHAT[微信公众号通知]
     end
 
     API --> CLOUDAPI
@@ -56,7 +54,6 @@ flowchart LR
 | 红外感知 | 检测人员经过并给出体温提示 | MLX90642、背景差分、热斑分析 | 已完成并接入 Uno |
 | 流感风险 | 获取周报、规则分级、现场播报 | PDF 解析、云端 API、本地缓存 | 已完成端云链路 |
 | AI 月报 | 归纳月内趋势、南北差异与防护建议 | DeepSeek API、结构化 JSON 校验 | 已接入云端网页 |
-| 微信通知 | 推送每周流感风险信息 | 公众号模板消息、幂等记录 | 已完成代码接入 |
 | 药箱控制 | 时钟、按键、显示、固定音频及串口接收 | Arduino Uno R3 | 基础功能及联合验收已完成 |
 
 > 药品识别属于项目的独立视觉模块，目前未在本仓库中归档。本仓库不会将人脸识别
@@ -115,7 +112,7 @@ USB 摄像头取帧
 → 树莓派从官网下载最新 PDF
 → 解析监测指标并上传云端
 → 云端复核风险等级、保存 PDF 和数据
-→ 网页更新并尝试发送微信通知
+→ 网页更新并提供周报、图表和 AI 月报
 → 树莓派读取最新风险
 → 高/中/低风险发送 0009/0010/0011
 ```
@@ -157,9 +154,9 @@ USB 摄像头取帧
 ### 云服务器
 
 - 接收树莓派通过 Bearer Token 上传的周报和原始 PDF；
-- 保存周报、规则风险、AI 月报与微信推送状态；
+- 保存周报、规则风险与 AI 月报；
 - 提供网页、图表、原始 PDF 和查询 API；
-- 保存 DeepSeek 与微信公众号凭据；
+- 保存 DeepSeek API Key 与周报上传令牌；
 - 面向用户提供持续访问入口。
 
 ### Arduino Uno R3
@@ -172,7 +169,7 @@ USB 摄像头取帧
 
 ```text
 medicine-box-face-demo/
-├── cloud/flu_web/                 云端 API、网页、数据库、AI 月报与微信推送
+├── cloud/flu_web/                 云端 API、网页、数据库与 AI 月报
 ├── deploy/systemd/                树莓派服务和每周定时任务
 ├── firmware/uno_r3/               Uno R3 归档固件
 ├── models/                        YuNet 与 SFace 模型
@@ -208,7 +205,45 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 ```
 
 当前自动化回归覆盖人脸决策、画面质量、模板、流感 API 缓存、红外检测和 Uno
-协议，共 42 项测试。
+协议及比赛演示调度。
+
+## 比赛演示程序
+
+统一演示入口为 `scripts/competition_demo.py`。正式运行前先在
+`demo_config.json` 中填写红外模块和 Uno 的 `/dev/serial/by-id/` 稳定路径；
+药品识别尚未归档，因此通过 `medicine_command` 接入独立程序，留空时会明确跳过。
+工程安装后也可使用等价命令 `medicine-box-demo`。
+
+演示前自检：
+
+```bash
+python3 scripts/competition_demo.py self-check
+```
+
+按“红外经过与体温—人脸识别—药品识别—流感预警—网页展示”的顺序运行：
+
+```bash
+python3 scripts/competition_demo.py run --display --open-web
+```
+
+无硬件、无网络的完整模拟：
+
+```bash
+python3 scripts/competition_demo.py simulate
+```
+
+单独演示某一模块：
+
+```bash
+python3 scripts/competition_demo.py thermal
+python3 scripts/competition_demo.py face --display
+python3 scripts/competition_demo.py medicine
+python3 scripts/competition_demo.py flu
+python3 scripts/competition_demo.py serial --code 0009
+```
+
+每次运行都会在 `logs/demo_日期时间.json` 保存步骤状态、耗时、音频编号和 ACK，
+不保存人脸图片。模拟结果始终标记为“模拟”，不会冒充实机结果。
 
 树莓派安装、注册、摄像头运行和硬件检查命令见
 [树莓派操作说明](README_树莓派操作说明.md)。
@@ -223,7 +258,6 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 - 官方流感周报下载、解析、规则分级、云端上传和原始 PDF 保存；
 - 云端周报/月报网页、图表与查询 API；
 - DeepSeek 月度分析及返回结构校验；
-- 微信公众号周风险推送、去重与失败记录；
 - 每周一 10:00 自动更新及 `0009/0010/0011` 风险播报；
 - 树莓派端断网缓存、进程间串口互斥和 systemd 自启动配置；
 - 42 项无硬件自动化测试通过。
@@ -233,7 +267,6 @@ PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 - 使用更多真实人员和不同光照数据继续标定人脸阈值；
 - 在最终安装结构下标定红外温度偏移、距离和环境阈值；
 - 为云端配置正式域名、HTTPS、备份和运行监控；
-- 使用正式公众号参数完成真实用户推送验收；
 - 完成长时间运行、异常断网恢复和电源稳定性测试；
 - 将独立药品识别模块统一归档并补充端到端演示流程。
 

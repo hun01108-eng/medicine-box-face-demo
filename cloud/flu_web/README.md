@@ -1,8 +1,7 @@
 # 云端流感风险信息网站
 
 本目录部署在云服务器，负责接收树莓派上传的官方周报数据与原始 PDF、保存
-SQLite 数据、展示周报及图表、调用 DeepSeek 生成月报，并向已关注用户发送
-微信公众号模板消息。周风险是可审计规则的结果，AI 仅用于月度文字归纳，均不
+SQLite 数据、展示周报及图表，并调用 DeepSeek 生成月报。周风险是可审计规则的结果，AI 仅用于月度文字归纳，均不
 代表个人诊断或医疗处方。
 
 ## 1. 安装依赖
@@ -61,23 +60,7 @@ python update_db_curl.py \
 
 也可以启动网站后，在页面上点击“生成本月月报”。同一月份已有月报时不会重复调用 AI。
 
-## 5. 配置微信公众号推送
-
-在云端服务环境中设置以下变量；任一必填项缺失时，推送会自动停用，但周报仍会
-正常入库：
-
-```bash
-export WECHAT_APP_ID="公众号AppID"
-export WECHAT_APP_SECRET="公众号AppSecret"
-export WECHAT_TEMPLATE_ID="模板ID"
-export WECHAT_OPENIDS="openid1,openid2"
-export WECHAT_REPORT_URL="https://你的域名/"
-```
-
-云端对相同“周次 + openid”的成功推送自动去重。失败状态会记入数据库，下次
-收到同一周数据时允许重试。凭据不得写入源码或提交到 Git。
-
-## 6. 启动网站
+## 5. 启动网站
 
 ```bash
 .venv/bin/python app.py
