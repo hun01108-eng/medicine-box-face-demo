@@ -51,7 +51,8 @@ cd /home/pi/medicine-box/current
 系统依赖安装不会由代码回退自动卸载，避免影响相机环境。
 # 红外模块附加依赖
 
-红外经过检测需要 `python3-serial`，并通过独立 USB 串口向 Uno 发送
-`PERSON_IN\n`。部署前使用 `/dev/serial/by-id/` 记录红外模块和 Uno 的稳定
+红外经过检测需要 `python3-serial`，并通过独立 USB 串口向 Uno 发送约定的
+四位音频码：有人经过为 `0004`，体温过高为 `0007`，体温正常为 `0008`。
+部署前使用 `/dev/serial/by-id/` 记录红外模块和 Uno 的稳定
 设备路径，避免把两个串口接反。红外运行日志放在共享的 `logs/` 目录，不应
 提交到 Git。

@@ -1,414 +1,295 @@
-# 智能药箱箱外单人脸识别 Demo
+# 多场景 AI 智能药箱
 
-这是智能药箱第三板块的树莓派软件原型。系统通过药箱外部摄像头识别唯一注册老人，并输出确定性的身份状态，为后续个性化用药服务选择用户档案。
+面向家庭、社区及养老照护场景的智能用药辅助系统。项目以 Raspberry Pi 为边缘
+计算核心，联合 USB 摄像头、MLX90642 红外阵列、Arduino Uno R3、语音模块与
+云端服务，形成“身份确认—经过感知—体温提示—流感风险预警—信息展示”的协同
+工作链路。
 
-> 人脸识别在本项目中只是**用户档案选择器**。它不识别药品，不生成或修改药名、剂量，也不能证明老人已经服药。
+本仓库重点归档树莓派视觉与传感程序、Uno R3 固件、流感风险 API 及云端网页。
+药箱的所有风险输出均用于健康信息提示，不替代医生诊断，也不会由 AI 自动修改
+药品名称、剂量或处方。
 
-## 一、项目目标
+## 项目亮点
 
-第一阶段只实现最小可演示版本：
+- **边缘智能：** 人脸图像与身份模板保留在树莓派本地，不上传云端。
+- **多传感协同：** USB 摄像头与红外阵列相互独立，单项故障不阻塞其他模块。
+- **开放集人脸识别：** 只确认已注册用户，陌生人、多人和低质量画面均安全拒绝。
+- **公共卫生风险服务：** 自动获取官方流感周报，完成解析、风险分级和网页展示。
+- **端云分工：** 树莓派负责采集、识别和现场播报；云端负责 API、数据库、月报及
+  用户访问。
+- **统一串口协议：** 树莓派以四位数字指令控制 Uno R3 播放对应语音，并等待 ACK。
+- **可审计决策：** 周风险等级由确定性规则产生；大模型仅用于月度文字归纳。
 
-```text
-注册1位老人 elder_001
-→ 摄像头发现人脸
-→ 在不同室内光照下进行检测和比对
-→ 基本在3秒内输出结果
-→ 匹配成功输出 MATCHED / elder_001
-→ 其他人员统一输出 UNKNOWN
-→ 不确定、画面质量差或多人出现时安全拒绝
-```
-
-当前阶段不追求多人脸库、大规模身份检索或复杂云端服务，优先保证流程简单、结果可解释、陌生人不会被强制归入已注册老人。
-
-## 二、总体思路
-
-系统采用“轻量人脸检测＋人脸特征比对＋多帧安全决策”的传统视觉方案，不使用大语言模型或大型视觉模型判断身份。
-
-- **树莓派：**摄像头取帧、人脸检测、图像质量检查、特征提取、身份比对和结果输出；
-- **YuNet：**定位人脸并给出五点关键点；
-- **SFace：**对齐人脸、提取特征向量并计算相似度；
-- **确定性决策程序：**控制相似度阈值、多帧投票、超时和安全拒绝；
-- **Arduino Uno：**后续继续负责原药箱的时钟、按键、OLED、LED和固定音频，不承担图像处理。
+## 系统架构
 
 ```mermaid
 flowchart LR
-    A[箱外摄像头] --> B[树莓派取帧]
-    B --> C[YuNet人脸检测]
-    C --> D{人脸数量与质量合格?}
-    D -- 否 --> E[UNKNOWN_RETRY / 拒绝]
-    D -- 是 --> F[五点对齐与CLAHE]
-    F --> G[SFace提取特征]
-    G --> H[与elder_001模板比较]
-    H --> I[3至5帧连续决策]
-    I --> J{达到标定阈值?}
-    J -- 是 --> K[MATCHED: elder_001]
-    J -- 否 --> L[UNKNOWN]
-    K --> M[允许上层请求对应用户档案]
-    E --> N[不加载任何个人计划]
-    L --> N
+    subgraph Edge[树莓派边缘端]
+        USB[USB 摄像头] --> FACE[YuNet + SFace\n本地人脸识别]
+        IR[MLX90642 红外阵列] --> THERMAL[经过检测与体温判断]
+        CDC[疾控中心官网周报] --> WORKER[PDF 下载与解析]
+        CLOUDAPI[云端周风险 API] --> RISK[风险读取与本地缓存]
+    end
+
+    WORKER -->|Bearer Token 上传| API
+
+    subgraph Cloud[云服务器]
+        API[Flask API] --> DB[(SQLite)]
+        DB --> WEB[周报/月报网页]
+        DB --> AI[DeepSeek 月度归纳]
+    end
+
+    API --> CLOUDAPI
+    FACE -->|0005 / 0006| UNO[Arduino Uno R3]
+    THERMAL -->|0004 + 0007 / 0008| UNO
+    RISK -->|0009 / 0010 / 0011| UNO
+    UNO --> AUDIO[语音提醒与基础药箱交互]
 ```
 
-## 三、为什么选择YuNet＋SFace
+## 功能组成
 
-第一版需要在树莓派CPU上运行，并尽量在3秒内完成识别，因此模型必须轻量且能够离线工作。
+| 模块 | 核心功能 | 实现方式 | 当前状态 |
+|---|---|---|---|
+| 人脸识别 | 识别注册用户并选择用户档案 | USB 摄像头、YuNet、SFace、多帧决策 | 已完成并接入 Uno |
+| 红外感知 | 检测人员经过并给出体温提示 | MLX90642、背景差分、热斑分析 | 已完成并接入 Uno |
+| 流感风险 | 获取周报、规则分级、现场播报 | PDF 解析、云端 API、本地缓存 | 已完成端云链路 |
+| AI 月报 | 归纳月内趋势、南北差异与防护建议 | DeepSeek API、结构化 JSON 校验 | 已接入云端网页 |
+| 药箱控制 | 时钟、按键、显示、固定音频及串口接收 | Arduino Uno R3 | 基础功能及联合验收已完成 |
 
-- YuNet适合实时人脸检测，能够输出后续对齐所需的关键点；
-- SFace把人脸转换为固定长度特征，不需要为一个人重新训练分类模型；
-- 注册模板可以提前计算，运行时只需进行特征提取和余弦相似度比较；
-- 模型完全在树莓派本地运行，不需要上传摄像头画面；
-- OpenCV提供统一接口，便于Python原型后续迁移到C++。
+> 药品识别属于项目的独立视觉模块，目前未在本仓库中归档。本仓库不会将人脸识别
+> 结果直接解释为“已经服药”。
 
-工程中已经包含来自OpenCV官方模型仓库的YuNet和SFace ONNX文件及SHA-256校验脚本。
+## AI 与算法边界
 
-## 四、注册流程
+项目中的“智能”并非全部依赖大模型，而是由不同算法按任务分工：
 
-注册必须由老人本人或监护人主动启动。
+### 1. 人脸识别
 
-```mermaid
-flowchart TD
-    A[采集老人多光照、多角度照片] --> B[每张图检测人脸]
-    B --> C{是否恰好1张人脸?}
-    C -- 否 --> X[拒绝该照片]
-    C -- 是 --> D[检查亮度、清晰度和人脸大小]
-    D --> E{质量是否合格?}
-    E -- 否 --> X
-    E -- 是 --> F[五点对齐]
-    F --> G[受控CLAHE亮度均衡]
-    G --> H[SFace提取特征]
-    H --> I[归一化特征向量]
-    I --> J[保存到data/elder_001.json]
-    J --> K[确认后删除临时注册照片]
-```
+- YuNet 负责人脸检测与关键点定位；
+- SFace 负责人脸特征提取和余弦相似度计算；
+- 程序执行亮度、清晰度、人脸尺寸、多帧投票和超时判断；
+- 不调用大语言模型，不上传日常人脸画面。
 
-推荐注册场景：
+### 2. 红外经过与体温提示
 
-- 普通室内正脸；
-- 明亮环境正脸；
-- 较暗环境正脸；
-- 左侧光和右侧光；
-- 轻微左转和轻微右转；
-- 老人平时戴眼镜时增加戴眼镜样本。
+- 使用 24×32 红外温度帧进行背景差分和热斑分析；
+- 通过冷却期抑制同一人员停留期间的重复触发；
+- 体温阈值用于演示提示，不等同于医疗级体温诊断。
 
-程序不会把注册原图复制到模板中，只保存归一化后的人脸特征向量。特征向量仍然属于敏感个人信息，必须限制访问并支持删除。
+### 3. 流感风险评估
 
-## 五、运行时程序逻辑
+- 周风险等级由阳性率、变化趋势、暴发数量和耐药指标的确定性规则生成；
+- 相同输入始终得到相同结果，便于复核和比赛答辩说明；
+- DeepSeek 只对一个月内的周报进行文字归纳，不参与个人诊断和用药决策。
 
-### 1. 人脸数量判断
+## 主要业务流程
 
-- 没有人脸：保持`WAITING`，不启动身份会话；
-- 只有一张人脸：进入质量检查；
-- 同时出现多张人脸：立即返回`UNKNOWN_RETRY / multiple_faces`，不选择其中任何一人。
-
-### 2. 图像质量门禁
-
-程序当前检查：
-
-- 人脸框宽度是否达到要求；
-- 人脸区域平均亮度是否过低；
-- 是否严重过曝；
-- 拉普拉斯方差是否表明画面模糊。
-
-质量不合格的帧不参与身份投票。系统继续等待更清晰的画面，达到3秒超时后拒绝本次识别。
-
-### 3. 特征比对
-
-质量合格后：
-
-1. 根据YuNet关键点对齐人脸；
-2. 在亮度通道执行受控CLAHE；
-3. 使用SFace生成特征向量；
-4. 与`elder_001`的多个注册模板分别计算余弦相似度；
-5. 取最佳模板相似度交给多帧决策模块。
-
-### 4. 多帧决策
-
-默认参数：
-
-```json
-{
-  "similarity_threshold": 0.55,
-  "required_matches": 3,
-  "max_valid_frames": 5,
-  "timeout_seconds": 3.0
-}
-```
-
-决策规则：
+### 人脸识别
 
 ```text
-3个有效帧达到阈值
-→ MATCHED / elder_001
-
-收集满5个有效帧仍不足3个匹配
-→ UNKNOWN
-
-画面质量持续不合格或处理超过3秒
-→ UNKNOWN_RETRY
-
-多人同时出现
-→ UNKNOWN_RETRY
+USB 摄像头取帧
+→ 人脸数量与画面质量检查
+→ YuNet 检测与五点对齐
+→ SFace 特征比对
+→ 3 至 5 帧连续决策
+→ 已注册用户发送 0005，其他或失败状态发送 0006
 ```
 
-`0.55`只是首轮保守起点，不是最终安全阈值。最终阈值必须使用实际老人样本和多位非注册人员数据进行标定，不能因为暗光识别失败就盲目降低阈值。
-
-## 六、多光照处理方案
-
-多光照准确性不能只依赖模型，应同时从安装、注册、预处理和决策四层处理。
-
-### 1. 摄像头安装
-
-- 固定摄像头高度、俯仰角和识别距离；
-- 避免摄像头正对窗户；
-- 让老人脸部在画面中占有足够像素；
-- 可增加柔和白光补光和扩散罩；
-- 默认使用 USB 摄像头 `/dev/video0`；必须实测安装距离下的人脸清晰度。
-
-### 2. 注册数据
-
-使用同一台摄像头、相近安装距离，采集明亮、普通、较暗和侧光模板，避免只注册一张正面照片。
-
-### 3. 图像预处理
-
-程序在人脸对齐后对亮度通道执行CLAHE，以减轻局部阴影和亮度不均。严重欠曝、过曝或模糊画面不会被强行增强后放行，而是进入重试。
-
-### 4. 多帧确认
-
-单帧光照波动不会立即决定身份。只有多个有效帧达到阈值才输出`MATCHED`，结果不稳定时安全拒绝。
-
-## 七、3秒识别目标
-
-3秒从**首次检测到画面中出现人脸**开始计算，不包括树莓派开机、程序冷启动、模型加载和摄像头启动。
-
-程序采用以下方式降低延迟：
-
-- 摄像头保持运行；
-- YuNet和SFace在启动时一次性加载；
-- 注册模板提前计算；
-- 只对检测到的单张合格人脸运行SFace；
-- 达到3个匹配帧后立即返回，不等待收集满5帧；
-- 默认使用640×480摄像头画面；
-- 提供20次P50/P95实机基准命令。
-
-目标验收条件：
+### 红外感知
 
 ```text
-明亮、普通、较暗、侧光、逆光分别测试
-已注册老人：记录成功率及P95延迟
-非注册人员：检查是否被错误放行
-目标：有效画面下P95识别延迟不超过3秒
+红外阵列读取温度帧
+→ 检测到人员经过
+→ 向 Uno 发送 0004“请吃药”
+→ 完成温度判断
+→ 体温过高发送 0007，体温正常发送 0008
 ```
 
-当前3秒目标尚未在实际树莓派和摄像头上验证，必须以`benchmark`命令的实机结果为准。
+### 每周流感预警
 
-## 八、身份状态与安全含义
-
-| 状态 | 含义 | 上层处理 |
-|---|---|---|
-| `WAITING` | 尚未获得足够信息 | 继续观察，不加载计划 |
-| `MATCHED` | 多帧确认注册老人 | 允许请求`elder_001`档案 |
-| `UNKNOWN` | 有效人脸与模板不匹配 | 拒绝加载个人计划 |
-| `UNKNOWN_RETRY` | 暗光、模糊、多人或超时 | 提示重新站位或人工处理 |
-| `ERROR` | 模型、模板或摄像头错误 | 停止个性化流程 |
-
-示例成功输出：
-
-```json
-{
-  "status": "MATCHED",
-  "user_id": "elder_001",
-  "confidence": 0.66,
-  "reason": "",
-  "valid_frames": 3,
-  "matching_frames": 3,
-  "latency_seconds": 0.4
-}
+```text
+每周一 10:00 触发 systemd timer
+→ 树莓派从官网下载最新 PDF
+→ 解析监测指标并上传云端
+→ 云端复核风险等级、保存 PDF 和数据
+→ 网页更新并提供周报、图表和 AI 月报
+→ 树莓派读取最新风险
+→ 高/中/低风险发送 0009/0010/0011
 ```
 
-其中`confidence`是人脸相似度，不是“服药安全概率”。
+更新、解析或上传任一步失败时，任务返回非零退出码，不会继续使用旧数据执行成功后
+播报。网络异常时，风险客户端可以读取本地缓存，但会明确标记 `stale=true`。
 
-## 九、软件结构
+## 串口通信协议
+
+- 波特率：`9600`
+- 格式：`8N1`
+- 指令：4 位 ASCII 数字，以 `\n` 结束
+- Uno 接收有效指令并加入播放队列后回复 `ACK\n`
+- ACK 等待时间：2 秒
+
+| 指令 | 含义 |
+|---|---|
+| `0004` | 有人经过，请吃药 |
+| `0005` | 人脸识别成功 |
+| `0006` | 人脸识别失败 |
+| `0007` | 体温过高 |
+| `0008` | 体温正常 |
+| `0009` | 流感高风险 |
+| `0010` | 流感中风险 |
+| `0011` | 流感低风险 |
+
+详细协议见 [R3 串口通信对接说明](R3串口通信对接说明.md)。
+
+## 端云职责
+
+### Raspberry Pi
+
+- 运行 USB 摄像头人脸识别；
+- 读取 MLX90642 红外帧；
+- 每周下载并解析流感周报；
+- 调用云端只读 API 并保存风险缓存；
+- 统一向 Uno R3 发送音频编号。
+
+### 云服务器
+
+- 接收树莓派通过 Bearer Token 上传的周报和原始 PDF；
+- 保存周报、规则风险与 AI 月报；
+- 提供网页、图表、原始 PDF 和查询 API；
+- 保存 DeepSeek API Key 与周报上传令牌；
+- 面向用户提供持续访问入口。
+
+### Arduino Uno R3
+
+- 负责时钟、按键、显示和基础药箱交互；
+- 接收树莓派四位数字指令并播放固定音频；
+- 不执行人脸识别、红外分析或大模型调用。
+
+## 仓库结构
 
 ```text
 medicine-box-face-demo/
-├── cloud/flu_web/              云端网页、数据库接口与受保护接收端
-├── workers/flu_updater/        树莓派官网周报下载、解析和上传任务
-├── README.md                    项目思路、方案与程序逻辑
-├── README_树莓派操作说明.md       安装、注册、运行和测试命令
-├── config.json                 模型、摄像头、质量与决策参数
-├── models/                     YuNet与SFace官方ONNX模型
-├── enrollment_images/          临时注册照片目录
-├── scripts/download_models.py  模型下载和SHA-256校验
+├── cloud/flu_web/                 云端 API、网页、数据库与 AI 月报
+├── deploy/systemd/                树莓派服务和每周定时任务
+├── firmware/uno_r3/               Uno R3 归档固件
+├── models/                        YuNet 与 SFace 模型
+├── scripts/                       模型下载、硬件检查和日志启动脚本
 ├── src/facebox/
-│   ├── app.py                  CLI入口与运行流程
-│   ├── camera.py               Picamera2/OpenCV摄像头适配
-│   ├── opencv_engine.py        检测、质量计算、对齐与特征提取
-│   ├── decision.py             多帧开放集身份决策
-│   ├── quality.py              亮度、清晰度和尺寸门禁
-│   ├── templates.py            特征模板保存与余弦比对
-│   ├── session.py              后续集成用身份会话过期模块
-│   ├── metrics.py              P50/P95延迟统计
-│   └── types.py                状态和数据结构
-└── tests/                      无摄像头自动测试
+│   ├── app.py                     统一命令入口
+│   ├── camera.py                  USB/Picamera2 摄像头适配
+│   ├── opencv_engine.py           人脸检测、对齐与特征提取
+│   ├── decision.py                多帧开放集决策
+│   ├── thermal.py                 红外帧解析与经过检测
+│   ├── thermal_app.py             红外运行与日志流程
+│   ├── flu_api.py                 云端风险 API 客户端及缓存
+│   ├── flu_app.py                 风险查询和 Uno 播报流程
+│   └── uno.py                     串口协议、文件锁和 ACK 处理
+├── tests/                          无硬件自动化测试
+├── workers/flu_updater/            树莓派周报下载、解析和上传任务
+├── config.json                     摄像头、识别和 API 参数
+└── README_树莓派操作说明.md          树莓派安装与运行指南
 ```
 
-`session.py`已准备身份离场失效逻辑，但当前单次Demo在给出一个终态结果后直接退出；与完整药箱状态机集成时再把会话模块接入持续运行流程。
+仅查看流感预警与 API 基础源码，可切换到
+[`flu-risk-api-minimal`](https://github.com/hun01108-eng/medicine-box-face-demo/tree/flu-risk-api-minimal)
+分支。
 
-## 十、快速体验
+## 快速验证
 
-无需摄像头运行自动测试：
+无需连接摄像头、红外阵列或 Uno：
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-```
-
-模拟已注册老人：
-
-```bash
 PYTHONPATH=src python3 -m facebox.app simulate --case known
-```
-
-模拟陌生人和异常情况：
-
-```bash
-PYTHONPATH=src python3 -m facebox.app simulate --case unknown
-PYTHONPATH=src python3 -m facebox.app simulate --case dark
-PYTHONPATH=src python3 -m facebox.app simulate --case multiple
-PYTHONPATH=src python3 -m facebox.app simulate --case timeout
-```
-
-真实注册、摄像头运行和基准测试命令请阅读：
-
-- [README_树莓派操作说明.md](README_树莓派操作说明.md)
-
-## 十一、隐私与医疗安全边界
-
-- 普通运行时原始帧只在内存中短暂处理；
-- 源码不调用`imwrite`或`VideoWriter`；
-- 默认不保存日常截图、视频或人脸图像日志；
-- `enrollment_images/`中的注册照片不会提交到Git；
-- `data/elder_001.json`人脸模板不会提交到Git；
-- `UNKNOWN`、超时、多人、低质量或错误状态均不得加载个人计划；
-- 人脸识别不能确认谁最终取了药或实际服用了药；
-- 人脸模块和AI均不得决定、生成或修改药品名称和剂量；
-- 第一版没有可靠活体检测，不能防止照片或手机屏幕冒用，不能宣传为强身份认证。
-
-## 十二、当前进度
-
-已完成：
-
-- 单人开放集决策框架；
-- YuNet＋SFace接口；
-- 默认 USB 摄像头输入，同时保留 Picamera2 兼容适配层；
-- 多光照注册模板支持；
-- 图像质量门禁；
-- 多帧确认和3秒超时；
-- 身份模板最小化存储；
-- P50/P95基准工具；
-- 18项无硬件自动测试；
-- 5种模拟识别路径；
-- 官方模型文件校验。
-
-待树莓派实机完成：
-
-1. 确认 USB 摄像头设备名并验证 `/dev/video0` 取帧；
-2. 采集老人多光照注册样本；
-3. 使用老人和多位陌生人数据标定阈值；
-4. 测试明亮、普通、较暗、侧光和逆光；
-5. 测量20次以上识别的P50/P95延迟；
-6. 根据实测结果调整补光、安装距离和质量阈值；
-7. 最后再接入Arduino药箱和个性化计划状态机。
-
-## 十三、参考资料
-
-- [OpenCV DNN人脸检测与识别教程](https://docs.opencv.org/4.x/d0/dd4/tutorial_dnn_face.html)
-- [OpenCV Zoo：YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
-- [OpenCV Zoo：SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)
-- [树莓派Picamera2说明文档](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf)
-
-## 十四、红外经过检测与 Uno 通知
-
-仓库现在同时包含 MLX90642-mini 红外阵列的人体经过检测。红外模块和
-USB 人脸摄像头相互独立：人脸识别命令保持不变，红外检测通过 USB
-串口读取 24×32 温度帧。发送给 Arduino Uno R3 的音频编号为：
-
-```text
-0004\n  有人经过/请吃药
-0005\n  人脸识别成功
-0006\n  人脸识别失败
-0007\n  体温过高
-0008\n  体温正常
-```
-
-红外检测确认有人经过后先发送 `0004`，默认间隔 2 秒，再根据测温结果发送
-`0007` 或 `0008`；体温过高门槛默认是 37.3°C，可用
-`--high-temperature` 和 `--audio-gap-seconds` 调整。Uno 可返回 `ACK\n`。
-树莓派无论是否收到 ACK 都会把事件和确认结果写入
-`logs/person_events.csv`，但同一个人停留期间不会反复发送。多个树莓派进程共用
-R3 时会通过文件锁串行发送，避免音频编号互相穿插。
-
-树莓派建议使用 `/dev/serial/by-id/` 下的稳定路径区分红外模块和 Uno：
-
-```bash
-ls -l /dev/serial/by-id/
-PYTHONPATH=src python3 -m facebox.app thermal-monitor \
-  --thermal-port /dev/serial/by-id/<thermal-device> \
-  --uno-port /dev/serial/by-id/<uno-device>
-```
-
-人脸识别接入 R3：
-
-```bash
-PYTHONPATH=src python3 -m facebox.app monitor \
-  --source opencv --device /dev/video0 \
-  --uno-port /dev/serial/by-id/<uno-device>
-```
-
-无硬件时可以验证状态机和日志：
-
-```bash
 PYTHONPATH=src python3 -m facebox.app thermal-monitor --simulate
 ```
 
-当前红外算法是背景差分和热斑检测，不是人脸定位或医用测温。`offset`、
-温度门槛和面积范围必须在实际安装距离与环境中重新标定。
+当前自动化回归覆盖人脸决策、画面质量、模板、流感 API 缓存、红外检测和 Uno
+协议及比赛演示调度。
 
-## 十五、云端流感风险 API
+## 比赛演示程序
 
-流感网站继续在云服务器上完成官网 PDF 下载、周报入库、DeepSeek 分析和网页展示。
-树莓派只读取网站的只读接口 `/api/weekly`，不保存 DeepSeek API Key，也不在本地
-重复生成月报。这样人脸图像和模板留在设备内，流感数据仍由云端统一维护。
+统一演示入口为 `scripts/competition_demo.py`。正式运行前先在
+`demo_config.json` 中填写红外模块和 Uno 的 `/dev/serial/by-id/` 稳定路径；
+药品识别尚未归档，因此通过 `medicine_command` 接入独立程序，留空时会明确跳过。
+工程安装后也可使用等价命令 `medicine-box-demo`。
 
-三个功能使用同一个 CLI，但保持彼此独立，单项故障不会阻塞其他传感器：
-
-```text
-USB摄像头 -> facebox run/monitor -> 0005 或 0006 / Uno
-MLX90642 -> thermal-monitor      -> 0004，再发送 0007 或 0008 / Uno
-云端网站 -> flu-status/monitor -> 高、中、低风险 + 本地缓存
-```
-
-单次读取当前风险：
+演示前自检：
 
 ```bash
-PYTHONPATH=src python3 -m facebox.app flu-status
+python3 scripts/competition_demo.py self-check
 ```
 
-常驻轮询（默认每小时一次，只在内容变化时输出）：
+按“红外经过与体温—人脸识别—药品识别—流感预警—网页展示”的顺序运行：
 
 ```bash
-PYTHONPATH=src python3 -m facebox.app flu-monitor
+python3 scripts/competition_demo.py run --display --open-web
 ```
 
-接口地址、超时、轮询间隔和缓存位置在 `config.json` 的 `flu_api` 节配置；临时切换
-服务器可设置 `FLU_API_BASE_URL` 或使用 `--api-base-url`。云端断开时输出中的
-`source` 为 `cache` 且 `stale` 为 `true`，调用方必须把它显示为缓存数据。
+无硬件、无网络的完整模拟：
 
-当前服务器使用 HTTP，适合先完成局域/演示联调；正式公网使用时应配置域名和 HTTPS。
-风险等级目前只输出和缓存，不会自动修改药物、剂量，也不会擅自触发 Uno 动作。
+```bash
+python3 scripts/competition_demo.py simulate
+```
 
-每周预警音频编号使用换行分隔的 ASCII 串口协议：高风险 `0009\n`、中风险
-`0010\n`、低风险 `0011\n`。`flu-audio` 会记录最近已发送周次，同一周默认
-只发送一次，R3 可返回 `ACK\n`，但未返回 ACK 不会自动重复播放。
+单独演示某一模块：
 
-电脑端原有的周报更新流程已整理到 `workers/flu_updater/`，可在树莓派上下载、
-解析并通过带令牌的接口上传云服务器；网页、主数据库和 DeepSeek 密钥仍留在云端。
-该更新器与人脸识别、红外检测互不占用摄像头或串口。
+```bash
+python3 scripts/competition_demo.py thermal
+python3 scripts/competition_demo.py face --display
+python3 scripts/competition_demo.py medicine
+python3 scripts/competition_demo.py flu
+python3 scripts/competition_demo.py serial --code 0009
+```
+
+每次运行都会在 `logs/demo_日期时间.json` 保存步骤状态、耗时、音频编号和 ACK，
+不保存人脸图片。模拟结果始终标记为“模拟”，不会冒充实机结果。
+
+树莓派安装、注册、摄像头运行和硬件检查命令见
+[树莓派操作说明](README_树莓派操作说明.md)。
+
+## 当前进度
+
+已完成：
+
+- USB 摄像头人脸识别、多帧安全决策及 Uno `0005/0006` 联动；
+- MLX90642 人员经过检测、体温提示及 Uno `0004/0007/0008` 联动；
+- Uno R3 基础功能、串口协议与硬件联合验收；
+- 官方流感周报下载、解析、规则分级、云端上传和原始 PDF 保存；
+- 云端周报/月报网页、图表与查询 API；
+- DeepSeek 月度分析及返回结构校验；
+- 每周一 10:00 自动更新及 `0009/0010/0011` 风险播报；
+- 树莓派端断网缓存、进程间串口互斥和 systemd 自启动配置；
+- 42 项无硬件自动化测试通过。
+
+后续工作：
+
+- 使用更多真实人员和不同光照数据继续标定人脸阈值；
+- 在最终安装结构下标定红外温度偏移、距离和环境阈值；
+- 为云端配置正式域名、HTTPS、备份和运行监控；
+- 完成长时间运行、异常断网恢复和电源稳定性测试；
+- 将独立药品识别模块统一归档并补充端到端演示流程。
+
+## 隐私与安全边界
+
+- 日常摄像头画面只在内存中处理，不默认保存图片或视频；
+- 注册图片、身份模板、数据库、PDF 缓存、日志和密钥均不提交到 Git；
+- 陌生人、多人、低质量画面和超时均不会加载个人用药档案；
+- 当前版本不具备可靠活体检测，不能作为强身份认证系统；
+- 红外结果不是医疗级体温诊断；
+- 流感风险是群体监测信息，不代表个人患病概率；
+- AI 不生成处方，也不自动修改药物和剂量。
+
+## 相关文档
+
+- [树莓派操作说明](README_树莓派操作说明.md)
+- [R3 串口通信对接说明](R3串口通信对接说明.md)
+- [流感风险评估与 API 模块说明](FLU_RISK_MODULE.md)
+- [部署记录](DEPLOYMENT.md)
+
+## 技术参考
+
+- [OpenCV DNN 人脸检测与识别](https://docs.opencv.org/4.x/d0/dd4/tutorial_dnn_face.html)
+- [OpenCV Zoo：YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
+- [OpenCV Zoo：SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)
+- [Raspberry Pi Picamera2 Manual](https://datasheets.raspberrypi.com/camera/picamera2-manual.pdf)

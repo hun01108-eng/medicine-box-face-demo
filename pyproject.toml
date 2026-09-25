@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 
 [project.scripts]
 facebox = "facebox.app:main"
+medicine-box-demo = "facebox.demo:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

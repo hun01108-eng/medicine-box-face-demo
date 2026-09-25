@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""流感月报与原始周报展示网站。"""
+"""云端流感风险信息服务。
+
+本模块保存树莓派上传的周报与原始 PDF，并提供网页、查询 API 和 AI 月报。
+"""
 
 import json
 import os
@@ -175,13 +178,15 @@ def api_ingest_weekly():
         )
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
         return jsonify({"status": "error", "message": str(exc)}), 400
+    report = {
+        "report_week": report_week,
+        "risk_level": risk_level,
+        "risk_reason": risk_reason,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
     return jsonify({
         "status": "success",
-        "data": {
-            "report_week": report_week,
-            "risk_level": risk_level,
-            "risk_reason": risk_reason,
-        },
+        "data": report,
     })
 
 
@@ -242,4 +247,10 @@ def api_health():
 
 if __name__ == "__main__":
     ensure_schema()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    debug = os.getenv("FLU_WEB_DEBUG", "").lower() in {"1", "true", "yes"}
+    app.run(
+        host=os.getenv("FLU_WEB_HOST", "127.0.0.1"),
+        port=int(os.getenv("FLU_WEB_PORT", "5000")),
+        debug=debug,
+        use_reloader=debug,
+    )

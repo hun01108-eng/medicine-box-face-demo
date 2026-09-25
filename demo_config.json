@@ -1,0 +1,10 @@
+{
+  "app_config": "config.json",
+  "uno_port": "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2:1.0-port0",
+  "thermal_port": "/dev/serial/by-path/platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.1:1.0-port0",
+  "cloud_url": "http://192.144.163.230",
+  "web_url": "http://192.144.163.230",
+  "face_timeout_seconds": 30.0,
+  "thermal_timeout_seconds": 60.0,
+  "medicine_command": []
+}

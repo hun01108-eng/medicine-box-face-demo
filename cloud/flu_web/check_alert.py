@@ -1,149 +1,73 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-智能药箱 - 流感预警声光模块（增强版）
-支持两种模式：debug（终端打印）和 real（串口控制 Arduino）
+"""检查云端周风险API，并可选向Uno R3发送对应语音编号。
+
+该脚本保留早期 ``--mode debug/real`` 的使用方式，但统一复用项目正式的
+``FluApiClient`` 和 ``UnoNotifier``，不再维护过期接口或第二套串口协议。
 """
 
-import requests
-import time
+from __future__ import annotations
+
 import argparse
+import json
 import sys
-
-API_URL = "http://127.0.0.1:5000/api/flu/alert"
-
-# 阈值（用于显示，实际判断在 API 端）
-SOUTH_THRESHOLD = 15.0
-NORTH_THRESHOLD = 10.0
+from pathlib import Path
 
 
-# ==================== 硬件控制（实际模式）====================
-def init_serial(port="COM3", baudrate=9600):
-    try:
-        import serial
-        ser = serial.Serial(port, baudrate, timeout=2)
-        time.sleep(2)
-        return ser
-    except Exception as e:
-        print(f"⚠️ 串口初始化失败: {e}")
-        return None
+# 支持从仓库内直接运行，不要求事先安装 facebox 包。
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+SOURCE_ROOT = REPOSITORY_ROOT / "src"
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
-def send_to_arduino(ser, command):
-    if ser is None:
-        return
-    try:
-        ser.write((command + "\n").encode())
-        print(f"   📤 已发送: {command}")
-    except Exception as e:
-        print(f"   ❌ 发送失败: {e}")
+from facebox.flu_api import FluApiClient  # noqa: E402
+from facebox.uno import UNO_BAUD, UnoNotifier  # noqa: E402
 
 
-def buzzer_on(mode, ser=None):
-    if mode == "debug":
-        print("   🔔 [调试] 蜂鸣器: 响")
-    else:
-        send_to_arduino(ser, "BUZZER_ON")
+def check_flu_alert(arguments) -> int:
+    """输出最新周风险；real模式额外发送0009、0010或0011。"""
+    client = FluApiClient(
+        arguments.api_base_url,
+        arguments.timeout,
+        arguments.cache,
+    )
+    status = client.fetch_latest(arguments.month, allow_cache=not arguments.no_cache)
+    output = {"status": "FLU_RISK", **status.to_dict()}
 
-def buzzer_off(mode, ser=None):
-    if mode == "debug":
-        print("   🔕 [调试] 蜂鸣器: 关")
-    else:
-        send_to_arduino(ser, "BUZZER_OFF")
+    if arguments.mode == "real":
+        notifier = UnoNotifier(arguments.port, arguments.baud)
+        try:
+            audio_code, acknowledged = notifier.notify_risk(status.risk_level)
+        finally:
+            notifier.close()
+        output.update({"audio_code": audio_code, "uno_ack": acknowledged})
 
-def led_on(mode, ser=None):
-    if mode == "debug":
-        print("   💡 [调试] LED: 亮")
-    else:
-        send_to_arduino(ser, "LED_ON")
-
-def led_off(mode, ser=None):
-    if mode == "debug":
-        print("   💤 [调试] LED: 灭")
-    else:
-        send_to_arduino(ser, "LED_OFF")
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
 
 
-def trigger_alert(mode, ser=None):
-    print("\n🚨 === 触发预警（声光）===")
-    for i in range(3):
-        print(f"  第 {i+1} 次")
-        buzzer_on(mode, ser)
-        led_on(mode, ser)
-        time.sleep(0.3)
-        buzzer_off(mode, ser)
-        led_off(mode, ser)
-        time.sleep(0.2)
-    print("   ✅ 预警信号已发送")
-    print("========================")
-
-
-def check_flu_alert(mode="debug", port="COM3"):
-    ser = None
-    if mode == "real":
-        print("🔌 尝试连接 Arduino...")
-        ser = init_serial(port)
-        if ser is None:
-            print("⚠️ 串口连接失败，自动切换到调试模式")
-            mode = "debug"
-        else:
-            print("✅ 串口连接成功")
-
-    print(f"📋 当前模式: {'实际模式（串口→UNO）' if mode == 'real' else '调试模式（打印信号）'}")
-    print("-" * 40)
+def main() -> int:
+    parser = argparse.ArgumentParser(description="检查流感周风险API和R3语音编号")
+    parser.add_argument("--mode", choices=("debug", "real"), default="debug")
+    parser.add_argument("--api-base-url", default="http://127.0.0.1:5000")
+    parser.add_argument("--month", help="可选月份，例如2026-09")
+    parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--cache", type=Path, default=Path("data/flu_risk_cache.json"))
+    parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument(
+        "--port",
+        default="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+        help="real模式使用的Uno稳定设备路径",
+    )
+    parser.add_argument("--baud", type=int, default=UNO_BAUD)
+    arguments = parser.parse_args()
 
     try:
-        resp = requests.get(API_URL, timeout=10)
-        data = resp.json()
-        if data.get('status') != 'success':
-            print("❌ API返回异常")
-            return
-
-        alert = data.get('alert', {})
-        flu_data = data.get('data', {})
-
-        print(f"📊 最新数据（{flu_data.get('report_week')}）")
-        print(f"   南方趋势: {flu_data.get('south_trend', '未知')}")
-        print(f"   北方趋势: {flu_data.get('north_trend', '未知')}")
-        print(f"   暴发疫情: {flu_data.get('outbreak_status', '未知')}")
-        if flu_data.get('h3n2_antigen_ratio'):
-            print(f"   H3N2抗原类似株: {flu_data['h3n2_antigen_ratio']}%")
-        if flu_data.get('h1n1_antigen_ratio'):
-            print(f"   H1N1抗原类似株: {flu_data['h1n1_antigen_ratio']}%")
-        if flu_data.get('b_antigen_ratio'):
-            print(f"   B/Victoria抗原类似株: {flu_data['b_antigen_ratio']}%")
-        if flu_data.get('h3n2_resistance_ratio'):
-            print(f"   H3N2耐药性降低: {flu_data['h3n2_resistance_ratio']}%")
-
-        print("-" * 40)
-        level = alert.get('level', 'normal')
-        message = alert.get('message', '')
-        details = alert.get('details', {})
-
-        if level != "normal":
-            print(f"🚨 预警触发！级别: {level}")
-            print(f"📢 提醒内容: {message}")
-            if details.get('dominant_type'):
-                print(f"   🦠 主要流行株: {details['dominant_type']}")
-            trigger_alert(mode, ser)
-        else:
-            print("✅ 流感活动水平正常，无需预警")
-    except requests.exceptions.RequestException as e:
-        print(f"❌ 网络请求失败: {e}")
-        print("   请确认 Flask 服务已启动: python app.py")
-    except Exception as e:
-        print(f"❌ 错误: {e}")
-    finally:
-        if ser:
-            ser.close()
+        return check_flu_alert(arguments)
+    except (RuntimeError, ValueError, OSError) as error:
+        print(json.dumps({"status": "ERROR", "reason": str(error)}, ensure_ascii=False))
+        return 1
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="智能药箱 - 流感预警声光模块")
-    parser.add_argument("--mode", choices=["debug", "real"], default="debug", help="运行模式")
-    parser.add_argument("--port", default="COM3", help="Arduino串口号")
-    args = parser.parse_args()
-
-    print("🩺 智能药箱 - 流感预警声光模块")
-    print(f"   运行时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 50)
-    check_flu_alert(mode=args.mode, port=args.port)
+    raise SystemExit(main())

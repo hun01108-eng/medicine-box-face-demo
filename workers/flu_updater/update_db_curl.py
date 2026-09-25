@@ -327,7 +327,7 @@ def main():
     info = get_latest_pdf_info()
     if not info:
         print("❌ 获取周报信息失败")
-        return
+        return 1
     detail_url, pdf_url, pdf_name = info
 
     date_match = re.search(r't(\d{8})_', detail_url)
@@ -346,12 +346,12 @@ def main():
 
     if not download_pdf(pdf_url, detail_url, filepath):
         print("❌ 下载失败")
-        return
+        return 1
 
     data = extract_data_from_pdf(filepath, report_date=report_date)
     if not data:
         print("❌ 解析失败")
-        return
+        return 1
 
     if args.cloud_url:
         upload_to_cloud(
@@ -368,7 +368,8 @@ def main():
     print(f"   北方阳性率: {data['north_rate']}%")
     print(f"   暴发疫情: {data['outbreak']} 起")
     print("=" * 55)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
