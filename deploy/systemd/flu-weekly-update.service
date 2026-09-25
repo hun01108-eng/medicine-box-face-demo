@@ -1,0 +1,20 @@
+[Unit]
+Description=Download and upload the latest flu weekly report
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/medicine-box/current
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/pi/medicine-box/current/src
+Environment=FLU_DATA_DIR=/home/pi/medicine-box/flu-worker-data
+ExecStart=/home/pi/medicine-box/current/.venv/bin/python /home/pi/medicine-box/current/workers/flu_updater/update_db_curl.py --cloud-url http://192.144.163.230 --token-file /home/pi/medicine-box/secrets/flu_ingest_token
+ExecStartPost=/home/pi/medicine-box/current/.venv/bin/python /home/pi/medicine-box/current/raspberry_pi/weekly_alert.py --mode real --api-base-url http://192.144.163.230 --port /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

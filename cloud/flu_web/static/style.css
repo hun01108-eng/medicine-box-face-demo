@@ -1,0 +1,107 @@
+:root {
+  color-scheme: light;
+  --ink: #172033;
+  --muted: #667085;
+  --line: #dfe5ee;
+  --surface: #ffffff;
+  --page: #f4f7fb;
+  --brand: #215db0;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+.site-header, main { width: min(1080px, calc(100% - 32px)); margin: 0 auto; }
+.site-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  padding: 44px 0 24px;
+}
+h1, h2, h3, p { margin-top: 0; }
+h1 { margin-bottom: 0; font-size: clamp(30px, 5vw, 46px); }
+h2 { margin-bottom: 0; font-size: 25px; }
+h3 { margin-bottom: 10px; }
+.eyebrow { margin-bottom: 7px; color: var(--brand); font-size: 13px; font-weight: 700; letter-spacing: .12em; }
+.month-picker { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+select, button {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  padding: 10px 13px;
+  color: var(--ink);
+  font: inherit;
+}
+button { cursor: pointer; background: var(--brand); color: white; border-color: var(--brand); }
+main { display: grid; gap: 22px; padding-bottom: 48px; }
+.monthly-section, .weekly-section, .charts-section, .empty-state {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  padding: clamp(22px, 4vw, 34px);
+  box-shadow: 0 10px 30px rgba(21, 35, 58, .05);
+}
+.section-heading, .weekly-title, .actions, .metrics {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+.summary { margin: 26px 0 12px; font-size: 19px; font-weight: 700; }
+.report-body { white-space: pre-line; line-height: 1.85; color: #344054; }
+.advice-list { line-height: 1.8; padding-left: 22px; }
+.meta, .weekly-title p, .risk-reason, .count { color: var(--muted); font-size: 13px; }
+.risk { flex: 0 0 auto; border-radius: 999px; padding: 7px 12px; font-size: 13px; font-weight: 700; }
+.risk-高 { background: #fee4e2; color: #b42318; }
+.risk-中 { background: #fef0c7; color: #b54708; }
+.risk-低 { background: #dcfae6; color: #067647; }
+.weekly-list { display: grid; gap: 14px; margin-top: 24px; }
+.weekly-card { border-top: 1px solid var(--line); padding-top: 20px; }
+.weekly-card:first-child { border-top: 0; padding-top: 0; }
+.weekly-title h3 { margin-bottom: 4px; }
+.weekly-title p, .risk-reason { margin-bottom: 0; }
+.metrics { justify-content: flex-start; flex-wrap: wrap; margin: 16px 0 10px; }
+.metrics span { background: var(--page); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+.actions { justify-content: flex-start; margin-top: 14px; }
+.actions a { color: var(--brand); font-weight: 700; text-decoration: none; }
+#generate-status { margin: 12px 0 0; color: var(--muted); }
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  margin-top: 26px;
+}
+.chart-panel { min-width: 0; }
+.chart-panel-wide { grid-column: 1 / -1; }
+.chart-panel h3 { font-size: 16px; }
+.chart { width: 100%; min-height: 245px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .axis, .chart .grid-line { stroke: #d8dee8; stroke-width: 1; }
+.chart .grid-line { stroke-dasharray: 3 5; }
+.chart .axis-label, .chart .value-label, .chart .legend-label {
+  fill: #667085;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 12px;
+}
+.chart .value-label { fill: var(--ink); font-weight: 700; }
+.chart .south-line { fill: none; stroke: #2166b1; stroke-width: 3; }
+.chart .north-line { fill: none; stroke: #d97706; stroke-width: 3; }
+.chart .south-point { fill: #2166b1; }
+.chart .north-point { fill: #d97706; }
+.chart .outbreak-bar { fill: #6f52a2; }
+.chart .risk-high { fill: #d92d20; }
+.chart .risk-medium { fill: #f79009; }
+.chart .risk-low { fill: #12b76a; }
+.chart-empty { color: var(--muted); padding: 70px 0; text-align: center; }
+
+@media (max-width: 620px) {
+  .site-header { align-items: stretch; flex-direction: column; gap: 20px; }
+  .section-heading, .weekly-title { align-items: flex-start; }
+  .metrics { align-items: stretch; flex-direction: column; }
+  .chart-grid { grid-template-columns: 1fr; }
+  .chart-panel-wide { grid-column: auto; }
+}
